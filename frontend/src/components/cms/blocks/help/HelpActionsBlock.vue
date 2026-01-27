@@ -18,6 +18,21 @@
             <span class="card-arrow">→</span>
           </div>
         </router-link>
+        <router-link
+          v-else-if="card.key === 'tickets' && !isAuthenticated && isInternalLink(card.guest_url || '')"
+          :to="card.guest_url"
+          class="action-card tickets"
+        >
+          <div class="card-background">
+            <CustomerServiceOutlined class="floating-icon icon-1" />
+          </div>
+          <div class="card-content">
+            <CustomerServiceOutlined class="card-icon" />
+            <h3 class="card-title">{{ card.title }}</h3>
+            <p class="card-description">{{ card.description }}</p>
+            <span class="card-arrow">→</span>
+          </div>
+        </router-link>
         <a v-else-if="card.key === 'tickets' && !isAuthenticated" :href="card.guest_url" class="action-card tickets">
           <div class="card-background">
             <CustomerServiceOutlined class="floating-icon icon-1" />
@@ -34,6 +49,19 @@
           <div class="card-background">
             <component :is="card.bgIcons[0]" class="floating-icon icon-1" />
             <component v-if="card.bgIcons[1]" :is="card.bgIcons[1]" class="floating-icon icon-2" :style="card.bgIcon2Style" />
+          </div>
+          <div class="card-content">
+            <component :is="card.icon" class="card-icon" />
+            <h3 class="card-title">{{ card.title }}</h3>
+            <p class="card-description">{{ card.description }}</p>
+            <span class="card-arrow">→</span>
+          </div>
+        </router-link>
+
+        <router-link v-else-if="isInternalLink(card.url)" :to="card.url" :class="['action-card', card.key]">
+          <div class="card-background">
+            <component :is="card.bgIcons[0]" class="floating-icon icon-1" />
+            <component v-if="card.bgIcons[1]" :is="card.bgIcons[1]" class="floating-icon icon-2" />
           </div>
           <div class="card-content">
             <component :is="card.icon" class="card-icon" />
@@ -83,6 +111,8 @@ const props = defineProps<{
   isAuthenticated: boolean;
 }>();
 
+const isInternalLink = (url: string) => String(url || "").trim().startsWith("/");
+
 const resolved = computed(() => {
   const c = props.content || {};
   const rawCards: CardInput[] = Array.isArray(c.cards) ? c.cards : [];
@@ -94,7 +124,7 @@ const resolved = computed(() => {
       title: "提交工单",
       description: "获取一对一的技术支持",
       url: "/console/tickets",
-      guest_url: "/auth/login",
+      guest_url: "/login",
     },
     { key: "announcements", title: "最新公告", description: "系统更新与重要通知", url: "/announcements" },
     { key: "contact", title: "邮件支持", description: "support@example.com", url: "mailto:support@example.com" },
@@ -124,7 +154,7 @@ const resolved = computed(() => {
         title: title || "提交工单",
         description: description || "获取一对一的技术支持",
         url: url || "/console/tickets",
-        guest_url: String(card?.guest_url ?? "/auth/login"),
+        guest_url: String(card?.guest_url ?? "/login"),
       };
     }
     if (key === "announcements") {

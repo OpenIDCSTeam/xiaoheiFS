@@ -2,9 +2,9 @@
   <Maintenance v-if="site.maintenanceMode" :message="site.maintenanceMessage" />
   <router-view v-else v-slot="{ Component, route }">
     <transition name="fade-slide" mode="out-in">
-      <div :key="route.fullPath">
-        <component :is="Component" />
-      </div>
+      <ErrorBoundary>
+        <component :is="Component" :key="route.matched[0]?.path || route.path" />
+      </ErrorBoundary>
     </transition>
   </router-view>
 </template>
@@ -12,6 +12,7 @@
 <script setup lang="ts">
 import { onMounted, watch } from "vue";
 import Maintenance from "@/pages/public/Maintenance.vue";
+import ErrorBoundary from "@/components/ErrorBoundary.vue";
 import { useSiteStore } from "@/stores/site";
 import defaultFaviconUrl from "@/assets/brand/default-favicon.svg";
 

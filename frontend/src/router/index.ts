@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { Modal } from "ant-design-vue";
 import PublicLayout from "@/layouts/PublicLayout.vue";
 import InstallLayout from "@/layouts/InstallLayout.vue";
 import UserLayout from "@/layouts/UserLayout.vue";
@@ -154,6 +155,7 @@ router.beforeEach(async (to) => {
   return true;
 });
 
+let chunkErrorPrompted = false;
 router.onError((err, to) => {
   const msg = String((err as any)?.message || err || "");
   // Common in production when a chunk is missing/stale (e.g. after deployment) or a route-level import fails.
@@ -163,7 +165,20 @@ router.onError((err, to) => {
     msg.includes("Loading chunk") ||
     msg.includes("ChunkLoadError")
   ) {
-    window.location.assign(to.fullPath);
+    if (chunkErrorPrompted) {
+      return;
+    }
+    chunkErrorPrompted = true;
+    Modal.confirm({
+      title: "页面资源加载失败",
+      content: "可能是资源更新或缓存导致。是否刷新页面后重试？",
+      okText: "刷新",
+      cancelText: "取消",
+      onOk: () => window.location.reload(),
+      onCancel: () => {
+        chunkErrorPrompted = false;
+      }
+    });
     return;
   }
   // eslint-disable-next-line no-console

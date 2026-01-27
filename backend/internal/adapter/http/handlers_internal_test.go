@@ -11,11 +11,12 @@ import (
 )
 
 func TestContainsDisallowedHTML(t *testing.T) {
-	if !containsDisallowedHTML("<script>alert(1)</script>") {
-		t.Fatalf("expected disallowed html")
+	out := sanitizeHTML("<script>alert(1)</script><p>ok</p>")
+	if strings.Contains(strings.ToLower(out), "<script") {
+		t.Fatalf("expected script to be removed, got %q", out)
 	}
-	if containsDisallowedHTML("<p>ok</p>") {
-		t.Fatalf("expected allowed html")
+	if !strings.Contains(out, "ok") {
+		t.Fatalf("expected content preserved, got %q", out)
 	}
 }
 

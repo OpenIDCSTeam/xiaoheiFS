@@ -487,6 +487,7 @@ func migrateSQLite(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_line_system_images_line ON line_system_images(line_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_cart_items_user ON cart_items(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_orders_user_status ON orders(user_id, status);`,
 		`CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_vps_instances_user ON vps_instances(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_vps_instances_order_item ON vps_instances(order_item_id);`,
@@ -500,6 +501,7 @@ func migrateSQLite(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_ticket_resources_ticket ON ticket_resources(ticket_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_transactions_ref ON wallet_transactions(user_id, ref_type, ref_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_wallet_orders_user ON wallet_orders(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(user_id, read_at);`,
@@ -515,61 +517,75 @@ func migrateSQLite(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "plan_groups", "line_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	_ = addColumnIfMissing(db, "users", "phone", "TEXT")
-	_ = addColumnIfMissing(db, "users", "bio", "TEXT")
-	_ = addColumnIfMissing(db, "users", "intro", "TEXT")
-	_ = addColumnIfMissing(db, "plan_groups", "add_core_min", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_core_max", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_core_step", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "plan_groups", "add_mem_min", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_mem_max", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_mem_step", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "plan_groups", "add_disk_min", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_disk_max", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_disk_step", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "plan_groups", "add_bw_min", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_bw_max", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "plan_groups", "add_bw_step", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "plan_groups", "visible", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "plan_groups", "capacity_remaining", "INTEGER NOT NULL DEFAULT -1")
-	_ = addColumnIfMissing(db, "packages", "product_id", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "packages", "port_num", "INTEGER NOT NULL DEFAULT 30")
-	_ = addColumnIfMissing(db, "packages", "visible", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "packages", "capacity_remaining", "INTEGER NOT NULL DEFAULT -1")
-	_ = addColumnIfMissing(db, "orders", "user_id", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "orders", "order_no", "TEXT NOT NULL DEFAULT ''")
-	_ = addColumnIfMissing(db, "orders", "status", "TEXT NOT NULL DEFAULT 'pending_payment'")
-	_ = addColumnIfMissing(db, "orders", "total_amount", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "orders", "currency", "TEXT NOT NULL DEFAULT 'CNY'")
-	_ = addColumnIfMissing(db, "orders", "idempotency_key", "TEXT")
-	_ = addColumnIfMissing(db, "orders", "pending_reason", "TEXT")
-	_ = addColumnIfMissing(db, "orders", "approved_by", "INTEGER")
-	_ = addColumnIfMissing(db, "orders", "approved_at", "DATETIME")
-	_ = addColumnIfMissing(db, "orders", "rejected_reason", "TEXT")
-	_ = addColumnIfMissing(db, "order_items", "duration_months", "INTEGER NOT NULL DEFAULT 1")
-	_ = addColumnIfMissing(db, "api_keys", "name", "TEXT NOT NULL DEFAULT ''")
-	_ = addColumnIfMissing(db, "api_keys", "status", "TEXT NOT NULL DEFAULT 'active'")
-	_ = addColumnIfMissing(db, "api_keys", "scopes_json", "TEXT NOT NULL DEFAULT '[]'")
-	_ = addColumnIfMissing(db, "api_keys", "permission_group_id", "INTEGER")
-	_ = addColumnIfMissing(db, "vps_instances", "admin_status", "TEXT NOT NULL DEFAULT 'normal'")
-	_ = addColumnIfMissing(db, "vps_instances", "last_emergency_renew_at", "DATETIME")
-	_ = addColumnIfMissing(db, "vps_instances", "access_info_json", "TEXT")
-	_ = addColumnIfMissing(db, "vps_instances", "region_id", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "line_id", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "package_id", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "package_name", "TEXT NOT NULL DEFAULT ''")
-	_ = addColumnIfMissing(db, "vps_instances", "cpu", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "memory_gb", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "disk_gb", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "bandwidth_mbps", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "port_num", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "vps_instances", "monthly_price", "INTEGER NOT NULL DEFAULT 0")
-	_ = addColumnIfMissing(db, "users", "avatar", "TEXT")
-	_ = addColumnIfMissing(db, "users", "permission_group_id", "INTEGER")
-	_ = addColumnIfMissing(db, "ticket_messages", "sender_name", "TEXT")
-	_ = addColumnIfMissing(db, "ticket_messages", "sender_qq", "TEXT")
-	_ = addColumnIfMissing(db, "permissions", "friendly_name", "TEXT")
-	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idem ON orders(user_id, idempotency_key)`)
+
+	addCols := []struct {
+		table string
+		col   string
+		typ   string
+	}{
+		{"users", "phone", "TEXT"},
+		{"users", "bio", "TEXT"},
+		{"users", "intro", "TEXT"},
+		{"plan_groups", "add_core_min", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_core_max", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_core_step", "INTEGER NOT NULL DEFAULT 1"},
+		{"plan_groups", "add_mem_min", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_mem_max", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_mem_step", "INTEGER NOT NULL DEFAULT 1"},
+		{"plan_groups", "add_disk_min", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_disk_max", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_disk_step", "INTEGER NOT NULL DEFAULT 1"},
+		{"plan_groups", "add_bw_min", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_bw_max", "INTEGER NOT NULL DEFAULT 0"},
+		{"plan_groups", "add_bw_step", "INTEGER NOT NULL DEFAULT 1"},
+		{"plan_groups", "visible", "INTEGER NOT NULL DEFAULT 1"},
+		{"plan_groups", "capacity_remaining", "INTEGER NOT NULL DEFAULT -1"},
+		{"packages", "product_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"packages", "port_num", "INTEGER NOT NULL DEFAULT 30"},
+		{"packages", "visible", "INTEGER NOT NULL DEFAULT 1"},
+		{"packages", "capacity_remaining", "INTEGER NOT NULL DEFAULT -1"},
+		{"orders", "user_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"orders", "order_no", "TEXT NOT NULL DEFAULT ''"},
+		{"orders", "status", "TEXT NOT NULL DEFAULT 'pending_payment'"},
+		{"orders", "total_amount", "INTEGER NOT NULL DEFAULT 0"},
+		{"orders", "currency", "TEXT NOT NULL DEFAULT 'CNY'"},
+		{"orders", "idempotency_key", "TEXT"},
+		{"orders", "pending_reason", "TEXT"},
+		{"orders", "approved_by", "INTEGER"},
+		{"orders", "approved_at", "DATETIME"},
+		{"orders", "rejected_reason", "TEXT"},
+		{"order_items", "duration_months", "INTEGER NOT NULL DEFAULT 1"},
+		{"api_keys", "name", "TEXT NOT NULL DEFAULT ''"},
+		{"api_keys", "status", "TEXT NOT NULL DEFAULT 'active'"},
+		{"api_keys", "scopes_json", "TEXT NOT NULL DEFAULT '[]'"},
+		{"api_keys", "permission_group_id", "INTEGER"},
+		{"vps_instances", "admin_status", "TEXT NOT NULL DEFAULT 'normal'"},
+		{"vps_instances", "last_emergency_renew_at", "DATETIME"},
+		{"vps_instances", "access_info_json", "TEXT"},
+		{"vps_instances", "region_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "line_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "package_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "package_name", "TEXT NOT NULL DEFAULT ''"},
+		{"vps_instances", "cpu", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "memory_gb", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "disk_gb", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "bandwidth_mbps", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "port_num", "INTEGER NOT NULL DEFAULT 0"},
+		{"vps_instances", "monthly_price", "INTEGER NOT NULL DEFAULT 0"},
+		{"users", "avatar", "TEXT"},
+		{"users", "permission_group_id", "INTEGER"},
+		{"ticket_messages", "sender_name", "TEXT"},
+		{"ticket_messages", "sender_qq", "TEXT"},
+		{"permissions", "friendly_name", "TEXT"},
+	}
+	for _, col := range addCols {
+		if err := addColumnIfMissing(db, col.table, col.col, col.typ); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idem ON orders(user_id, idempotency_key)`); err != nil {
+		return err
+	}
 	if err := migrateMoneyToCents(db); err != nil {
 		return err
 	}

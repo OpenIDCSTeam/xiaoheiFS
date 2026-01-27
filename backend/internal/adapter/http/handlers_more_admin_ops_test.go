@@ -95,7 +95,7 @@ func TestHandlers_AdminOpsMore(t *testing.T) {
 	}
 	rec = testutil.DoJSON(t, env.Router, http.MethodPost, "/admin/api/v1/orders/"+testutil.Itoa(order.ID)+"/mark-paid", map[string]any{
 		"method":   "manual",
-		"amount":   9,
+		"amount":   900,
 		"currency": "CNY",
 		"trade_no": "TN-ADM",
 	}, adminToken)

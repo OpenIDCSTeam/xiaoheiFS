@@ -453,6 +453,50 @@ func (r *SQLiteRepo) CreateOrder(ctx context.Context, order *domain.Order) error
 	return nil
 }
 
+func (r *SQLiteRepo) CreateOrderFromCartAtomic(ctx context.Context, order domain.Order, items []domain.OrderItem) (created domain.Order, createdItems []domain.OrderItem, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Order{}, nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	res, err := tx.ExecContext(ctx, `INSERT INTO orders(user_id,order_no,status,total_amount,currency,idempotency_key,pending_reason,approved_by,approved_at,rejected_reason) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		order.UserID, order.OrderNo, order.Status, order.TotalAmount, order.Currency, nullIfEmpty(order.IdempotencyKey), order.PendingReason, order.ApprovedBy, order.ApprovedAt, order.RejectedReason)
+	if err != nil {
+		return domain.Order{}, nil, err
+	}
+	id, _ := res.LastInsertId()
+	order.ID = id
+
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO order_items(order_id,package_id,system_id,spec_json,qty,amount,status,automation_instance_id,action,duration_months) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return domain.Order{}, nil, err
+	}
+	defer stmt.Close()
+	for i := range items {
+		items[i].OrderID = order.ID
+		res, err := stmt.ExecContext(ctx, items[i].OrderID, items[i].PackageID, items[i].SystemID, items[i].SpecJSON, items[i].Qty, items[i].Amount, items[i].Status, items[i].AutomationInstanceID, items[i].Action, items[i].DurationMonths)
+		if err != nil {
+			return domain.Order{}, nil, err
+		}
+		itemID, _ := res.LastInsertId()
+		items[i].ID = itemID
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM cart_items WHERE user_id = ?`, order.UserID); err != nil {
+		return domain.Order{}, nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.Order{}, nil, err
+	}
+	return order, items, nil
+}
+
 func (r *SQLiteRepo) GetOrder(ctx context.Context, id int64) (domain.Order, error) {
 	row := r.db.QueryRowContext(ctx, `SELECT id, user_id, order_no, status, total_amount, currency, idempotency_key, pending_reason, approved_by, approved_at, rejected_reason, created_at, updated_at FROM orders WHERE id = ?`, id)
 	return scanOrder(row)

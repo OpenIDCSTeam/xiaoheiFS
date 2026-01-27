@@ -25,6 +25,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
@@ -37,6 +38,18 @@ import (
 	"xiaoheiplay/internal/pkg/permissions"
 	"xiaoheiplay/internal/usecase"
 )
+
+var (
+	htmlPolicy       = bluemonday.UGCPolicy()
+	forgotPwdLimiter = newRateLimiter()
+)
+
+func sanitizeHTML(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return htmlPolicy.Sanitize(raw)
+}
 
 type Handler struct {
 	authSvc       *usecase.AuthService
@@ -192,7 +205,11 @@ func (h *Handler) Login(c *gin.Context) {
 		"role":    user.Role,
 		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
-	signed, _ := token.SignedString(h.jwtSecret)
+	signed, err := token.SignedString(h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "sign token failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"access_token": signed, "expires_in": 86400, "user": gin.H{"id": user.ID, "username": user.Username, "role": user.Role}})
 }
 
@@ -209,7 +226,11 @@ func (h *Handler) Refresh(c *gin.Context) {
 		"role":    role,
 		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
-	signed, _ := token.SignedString(h.jwtSecret)
+	signed, err := token.SignedString(h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "sign token failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"access_token": signed, "expires_in": 86400})
 }
 
@@ -1774,7 +1795,11 @@ func (h *Handler) AdminLogin(c *gin.Context) {
 		"role":    user.Role,
 		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
-	signed, _ := token.SignedString(h.jwtSecret)
+	signed, err := token.SignedString(h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "sign token failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"access_token": signed, "expires_in": 86400})
 }
 
@@ -2025,7 +2050,11 @@ func (h *Handler) AdminUserImpersonate(c *gin.Context) {
 		"role":    user.Role,
 		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
-	signed, _ := token.SignedString(h.jwtSecret)
+	signed, err := token.SignedString(h.jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "sign token failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"access_token": signed, "expires_in": 86400, "user": gin.H{"id": user.ID, "username": user.Username, "role": user.Role}})
 }
 
@@ -4365,6 +4394,15 @@ func (h *Handler) AdminForgotPassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
+	ip := strings.TrimSpace(c.ClientIP())
+	if ip == "" {
+		ip = "unknown"
+	}
+	if !forgotPwdLimiter.Allow("admin_forgot_password:ip:"+ip, 5, 15*time.Minute) ||
+		!forgotPwdLimiter.Allow("admin_forgot_password:email:"+strings.ToLower(strings.TrimSpace(payload.Email)), 3, 15*time.Minute) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many requests"})
+		return
+	}
 	if h.passwordReset == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
 		return
@@ -4732,10 +4770,7 @@ func (h *Handler) AdminCMSPostCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "category_id, title, slug required"})
 		return
 	}
-	if containsDisallowedHTML(payload.ContentHTML) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "content_html contains disallowed tags"})
-		return
-	}
+	payload.ContentHTML = sanitizeHTML(payload.ContentHTML)
 	var publishedAt *time.Time
 	if payload.PublishedAt != "" {
 		if t, err := time.Parse(time.RFC3339, payload.PublishedAt); err == nil {
@@ -4791,11 +4826,7 @@ func (h *Handler) AdminCMSPostUpdate(c *gin.Context) {
 		post.Summary = *payload.Summary
 	}
 	if payload.ContentHTML != nil {
-		if containsDisallowedHTML(*payload.ContentHTML) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "content_html contains disallowed tags"})
-			return
-		}
-		post.ContentHTML = *payload.ContentHTML
+		post.ContentHTML = sanitizeHTML(*payload.ContentHTML)
 	}
 	if payload.CoverURL != nil {
 		post.CoverURL = *payload.CoverURL
@@ -4892,9 +4923,8 @@ func (h *Handler) AdminCMSBlockCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "content_json invalid"})
 		return
 	}
-	if typeName == "custom_html" && containsDisallowedHTML(payload.CustomHTML) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "custom_html contains disallowed tags"})
-		return
+	if typeName == "custom_html" {
+		payload.CustomHTML = sanitizeHTML(payload.CustomHTML)
 	}
 	visible := true
 	if payload.Visible != nil {
@@ -4950,11 +4980,11 @@ func (h *Handler) AdminCMSBlockUpdate(c *gin.Context) {
 		block.ContentJSON = *payload.ContentJSON
 	}
 	if payload.CustomHTML != nil {
-		if block.Type == "custom_html" && containsDisallowedHTML(*payload.CustomHTML) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "custom_html contains disallowed tags"})
-			return
+		if block.Type == "custom_html" {
+			block.CustomHTML = sanitizeHTML(*payload.CustomHTML)
+		} else {
+			block.CustomHTML = *payload.CustomHTML
 		}
-		block.CustomHTML = *payload.CustomHTML
 	}
 	if payload.Lang != nil {
 		block.Lang = strings.TrimSpace(*payload.Lang)
@@ -5004,6 +5034,25 @@ func (h *Handler) AdminUploadCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file too large"})
 		return
 	}
+	opened, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file open failed"})
+		return
+	}
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(opened, head)
+	_ = opened.Close()
+	detected := http.DetectContentType(head[:n])
+	allowed := map[string]bool{
+		"image/png":  true,
+		"image/jpeg": true,
+		"image/gif":  true,
+		"image/webp": true,
+	}
+	if !allowed[detected] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported file type"})
+		return
+	}
 	dateDir := time.Now().Format("20060102")
 	if err := os.MkdirAll(filepath.Join("uploads", dateDir), 0o755); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "upload dir error"})
@@ -5016,7 +5065,7 @@ func (h *Handler) AdminUploadCreate(c *gin.Context) {
 		return
 	}
 	url := "/uploads/" + dateDir + "/" + name
-	item := domain.Upload{Name: file.Filename, Path: localPath, URL: url, Mime: file.Header.Get("Content-Type"), Size: file.Size, UploaderID: getUserID(c)}
+	item := domain.Upload{Name: file.Filename, Path: localPath, URL: url, Mime: detected, Size: file.Size, UploaderID: getUserID(c)}
 	if err := h.uploads.CreateUpload(c, &item); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -5036,11 +5085,6 @@ func (h *Handler) AdminUploads(c *gin.Context) {
 		resp = append(resp, toUploadDTO(item))
 	}
 	c.JSON(http.StatusOK, gin.H{"items": resp, "total": total})
-}
-
-func containsDisallowedHTML(raw string) bool {
-	lower := strings.ToLower(raw)
-	return strings.Contains(lower, "<script") || strings.Contains(lower, "<iframe")
 }
 
 func validateCMSPageKey(page string) error {

@@ -13,8 +13,11 @@ func (s *OrderService) ProcessResizeTasks(ctx context.Context, limit int) error 
 	if err != nil {
 		return err
 	}
+	var firstErr error
 	for _, task := range tasks {
-		_ = s.executeResizeTask(ctx, task)
+		if err := s.executeResizeTask(ctx, task); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }

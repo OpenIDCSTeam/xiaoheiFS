@@ -96,9 +96,6 @@ func (s *OrderService) CreateOrderFromCart(ctx context.Context, userID int64, cu
 		Currency:       currency,
 		IdempotencyKey: idemKey,
 	}
-	if err := s.orders.CreateOrder(ctx, &order); err != nil {
-		return domain.Order{}, nil, err
-	}
 
 	var orderItems []domain.OrderItem
 	for _, item := range items {
@@ -127,11 +124,31 @@ func (s *OrderService) CreateOrderFromCart(ctx context.Context, userID int64, cu
 			})
 		}
 	}
-	_ = s.orders.UpdateOrderStatus(ctx, order.ID, domain.OrderStatusPendingPayment)
-	if err := s.items.CreateOrderItems(ctx, orderItems); err != nil {
-		return domain.Order{}, nil, err
+
+	type orderFromCartAtomicCreator interface {
+		CreateOrderFromCartAtomic(ctx context.Context, order domain.Order, items []domain.OrderItem) (domain.Order, []domain.OrderItem, error)
 	}
-	_ = s.cart.ClearCart(ctx, userID)
+	if atomic, ok := s.orders.(orderFromCartAtomicCreator); ok {
+		createdOrder, createdItems, err := atomic.CreateOrderFromCartAtomic(ctx, order, orderItems)
+		if err != nil {
+			return domain.Order{}, nil, err
+		}
+		order = createdOrder
+		orderItems = createdItems
+	} else {
+		if err := s.orders.CreateOrder(ctx, &order); err != nil {
+			return domain.Order{}, nil, err
+		}
+		for i := range orderItems {
+			orderItems[i].OrderID = order.ID
+		}
+		if err := s.items.CreateOrderItems(ctx, orderItems); err != nil {
+			return domain.Order{}, nil, err
+		}
+		if err := s.cart.ClearCart(ctx, userID); err != nil {
+			return domain.Order{}, nil, err
+		}
+	}
 	if s.events != nil {
 		_, _ = s.events.Publish(ctx, order.ID, "order.pending_payment", map[string]any{
 			"status": order.Status,
@@ -268,6 +285,9 @@ func (s *OrderService) SubmitPayment(ctx context.Context, userID int64, orderID 
 	if input.Currency == "" {
 		input.Currency = order.Currency
 	}
+	if order.Currency != "" && input.Currency != order.Currency {
+		return domain.OrderPayment{}, ErrInvalidInput
+	}
 	payment := domain.OrderPayment{
 		OrderID:        order.ID,
 		UserID:         userID,
@@ -365,6 +385,9 @@ func (s *OrderService) MarkPaid(ctx context.Context, adminID int64, orderID int6
 	}
 	if input.Currency == "" {
 		input.Currency = order.Currency
+	}
+	if order.Currency != "" && input.Currency != order.Currency {
+		return domain.OrderPayment{}, ErrInvalidInput
 	}
 	payment := domain.OrderPayment{
 		OrderID:       order.ID,

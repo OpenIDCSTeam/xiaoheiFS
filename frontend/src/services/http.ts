@@ -3,6 +3,7 @@ import { message, notification, Modal } from "ant-design-vue";
 import { useAuthStore } from "@/stores/auth";
 import { useAdminAuthStore } from "@/stores/adminAuth";
 import { useAppStore } from "@/stores/app";
+import { navigateReplace } from "@/services/navigate";
 
 const apiBase = import.meta.env.VITE_API_BASE || "";
 
@@ -40,18 +41,19 @@ http.interceptors.response.use(
     const status = error?.response?.status;
     const msg = error?.response?.data?.error || error?.response?.data?.message || error?.message || "Request failed";
     const url = error?.config?.url || "";
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (status === 401) {
       if (url.startsWith("/admin/")) {
         const admin = useAdminAuthStore();
         admin.logout();
         if (window.location.pathname.startsWith("/admin")) {
-          window.location.href = "/admin/login";
+          navigateReplace(`/admin/login?redirect=${encodeURIComponent(current)}`);
         }
       } else {
         const user = useAuthStore();
         user.logout();
         if (!window.location.pathname.startsWith("/admin")) {
-          window.location.href = "/";
+          navigateReplace(`/login?redirect=${encodeURIComponent(current)}`);
         }
       }
       message.error("鉴权失败，请重新登录");
@@ -64,7 +66,7 @@ http.interceptors.response.use(
           okText: "去认证",
           cancelText: "稍后再说",
           onOk: () => {
-            window.location.href = "/console/realname";
+            navigateReplace("/console/realname");
           },
           onCancel: () => {
             realnameModalOpen = false;

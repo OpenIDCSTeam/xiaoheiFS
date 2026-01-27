@@ -2,6 +2,9 @@ package http_test
 
 import (
 	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -34,11 +37,17 @@ func TestHandlers_AdminUploads(t *testing.T) {
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile("file", "hello.txt")
+	part, err := writer.CreateFormFile("file", "hello.png")
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
-	if _, err := io.WriteString(part, "hello"); err != nil {
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	if _, err := io.Copy(part, &pngBuf); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 	if err := writer.Close(); err != nil {

@@ -1,6 +1,8 @@
 package http_test
 
 import (
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,5 +47,24 @@ func TestMiddleware_RequireAdmin_Forbidden(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_RejectsNoneAlg(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mw := httpadapter.NewMiddleware("secret", nil, nil)
+	r := gin.New()
+	r.GET("/me", mw.RequireUser(), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"user_id":%d,"role":"user","exp":%d}`, 1, time.Now().Add(time.Hour).Unix())))
+	tokenStr := header + "." + payload + "."
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
 	}
 }

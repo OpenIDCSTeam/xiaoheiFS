@@ -104,7 +104,10 @@
           <template v-else>
             <div class="footer-section" v-for="(section, index) in sections" :key="index">
               <h4>{{ section.title }}</h4>
-              <a v-for="(link, linkIndex) in section.links" :key="linkIndex" :href="link.url">{{ link.label }}</a>
+              <template v-for="(link, linkIndex) in section.links" :key="linkIndex">
+                <router-link v-if="isInternalLink(link.url)" :to="link.url">{{ link.label }}</router-link>
+                <a v-else :href="link.url">{{ link.label }}</a>
+              </template>
             </div>
           </template>
         </div>
@@ -159,6 +162,11 @@ const props = defineProps<{
   sections: Array<{ title?: string; links: Array<{ label?: string; url?: string }> }>
   badges: string[]
 }>()
+
+const isInternalLink = (url?: string) => {
+  const value = String(url || "").trim()
+  return value.startsWith("/")
+}
 
 // 获取 CMS 编辑上下文
 const cmsEditContext: any = inject('cmsEditContext', null)

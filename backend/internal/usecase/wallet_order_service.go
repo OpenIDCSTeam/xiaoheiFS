@@ -313,9 +313,34 @@ func (s *WalletOrderService) approveOrder(ctx context.Context, adminID int64, or
 	default:
 		return domain.Wallet{}, ErrInvalidInput
 	}
-	wallet, err := s.wallets.AdjustWalletBalance(ctx, order.UserID, amount, txType, "wallet_order", order.ID, string(order.Type))
+
+	// Idempotency: wallet_transactions uses (user_id, ref_type, ref_id) to dedupe.
+	// This makes Approve safe to retry when balance adjustment succeeded but order status update failed.
+	refType := "wallet_order"
+	exists, err := s.wallets.HasWalletTransaction(ctx, order.UserID, refType, order.ID)
 	if err != nil {
 		return domain.Wallet{}, err
+	}
+	var wallet domain.Wallet
+	if exists {
+		wallet, err = s.wallets.GetWallet(ctx, order.UserID)
+		if err != nil {
+			return domain.Wallet{}, err
+		}
+	} else {
+		wallet, err = s.wallets.AdjustWalletBalance(ctx, order.UserID, amount, txType, refType, order.ID, string(order.Type))
+		if err != nil {
+			// In case of a concurrent approve, the transaction insert may have raced and won elsewhere.
+			ok, checkErr := s.wallets.HasWalletTransaction(ctx, order.UserID, refType, order.ID)
+			if checkErr == nil && ok {
+				wallet, checkErr = s.wallets.GetWallet(ctx, order.UserID)
+				if checkErr != nil {
+					return domain.Wallet{}, checkErr
+				}
+			} else {
+				return domain.Wallet{}, err
+			}
+		}
 	}
 	if err := s.orders.UpdateWalletOrderStatus(ctx, order.ID, domain.WalletOrderApproved, &adminID, ""); err != nil {
 		return domain.Wallet{}, err

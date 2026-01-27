@@ -1,0 +1,66 @@
+/frontend/node_modules/
+/sdk/
+/mui2/
+/auroraboat-main/
+/frontend/nul
+
+/backend/.claude/
+/backend/.plan/
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Air temp directory
+tmp/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+install.lock
+app.config.json
+app.config.yaml
+app.config.yml
+
+# Config (sensitive data)
+config.local.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+/.plan/
+
+/build/
+
+/frontend/.vite/
+/frontend/.claude/
+/frontend/.idea/
+/CLAUDE.md
+/backend/.claude/
+/backend/.plan/
+/backend/tmp/
+/backend/data/
+/backend/uploads/
+/frontend/dist/

@@ -277,6 +277,9 @@ func (m *Middleware) parseToken(c *gin.Context) (jwt.MapClaims, error) {
 	}
 	claims := jwt.MapClaims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (any, error) {
+		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, errors.New("unexpected signing method")
+		}
 		return m.jwtSecret, nil
 	})
 	if err != nil || !token.Valid {

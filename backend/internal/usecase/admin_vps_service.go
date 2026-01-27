@@ -325,7 +325,9 @@ func (s *AdminVPSService) Delete(ctx context.Context, adminID int64, vpsID int64
 	if err := s.automation.DeleteHost(ctx, hostID); err != nil {
 		return err
 	}
-	_ = s.vps.DeleteInstance(ctx, inst.ID)
+	if err := s.vps.DeleteInstance(ctx, inst.ID); err != nil {
+		return err
+	}
 	if s.audit != nil {
 		_ = s.audit.AddAuditLog(ctx, domain.AdminAuditLog{AdminID: adminID, Action: "vps.delete", TargetType: "vps", TargetID: fmt.Sprintf("%d", inst.ID), DetailJSON: "{}"})
 	}
