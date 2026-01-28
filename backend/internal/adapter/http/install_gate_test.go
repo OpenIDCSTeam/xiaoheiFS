@@ -3,10 +3,10 @@ package http_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 
+	adapterhttp "xiaoheiplay/internal/adapter/http"
 	"xiaoheiplay/internal/testutilhttp"
 )
 
@@ -14,15 +14,8 @@ func TestInstallGate_RedirectsBeforeInstalled(t *testing.T) {
 	lockDir := t.TempDir()
 	lockPath := filepath.Join(lockDir, "install.lock")
 
-	prev := os.Getenv("APP_INSTALL_LOCK_PATH")
-	_ = os.Setenv("APP_INSTALL_LOCK_PATH", lockPath)
-	t.Cleanup(func() {
-		if prev == "" {
-			_ = os.Unsetenv("APP_INSTALL_LOCK_PATH")
-		} else {
-			_ = os.Setenv("APP_INSTALL_LOCK_PATH", prev)
-		}
-	})
+	adapterhttp.SetInstallLockPathForTest(lockPath)
+	t.Cleanup(func() { adapterhttp.SetInstallLockPathForTest("") })
 
 	env := testutilhttp.NewTestEnv(t, false)
 

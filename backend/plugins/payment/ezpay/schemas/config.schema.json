@@ -1,0 +1,15 @@
+{
+  "title": "EZPay Config",
+  "type": "object",
+  "properties": {
+    "base_url": { "type": "string", "title": "Gateway URL", "default": "https://pays.org.cn/submit.php" },
+    "pid": { "type": "string", "title": "Merchant PID" },
+    "key": { "type": "string", "title": "Merchant Key", "format": "password" },
+    "pay_type": { "type": "string", "title": "Pay Type", "default": "alipay" },
+    "notify_url": { "type": "string", "title": "Notify URL" },
+    "return_url": { "type": "string", "title": "Return URL" },
+    "sign_type": { "type": "string", "title": "Sign Type", "default": "MD5" }
+  },
+  "required": ["base_url", "pid", "key"]
+}
+

@@ -207,6 +207,18 @@ func migrateSQLite(db *sql.DB) error {
 			value_json TEXT NOT NULL,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_installations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			category TEXT NOT NULL,
+			plugin_id TEXT NOT NULL,
+			instance_id TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 0,
+			signature_status TEXT NOT NULL DEFAULT 'unsigned',
+			config_cipher TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_installations_cat_id ON plugin_installations(category, plugin_id);`,
 		`CREATE TABLE IF NOT EXISTS email_templates (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,

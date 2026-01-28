@@ -21,20 +21,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const installLockEnvKey = "APP_INSTALL_LOCK_PATH"
 const installConfigPath = "app.config.yaml"
 
+var installLockPathOverride string
+
 func installLockPath() string {
-	if v := strings.TrimSpace(os.Getenv(installLockEnvKey)); v != "" {
-		return v
+	if strings.TrimSpace(installLockPathOverride) != "" {
+		return strings.TrimSpace(installLockPathOverride)
 	}
 	return "install.lock"
 }
 
 func (h *Handler) IsInstalled() bool {
 	// Keep existing test suite behavior: tests run without an install.lock by default.
-	// Installer behavior is covered by explicit tests that set APP_INSTALL_LOCK_PATH.
-	if gin.Mode() == gin.TestMode && strings.TrimSpace(os.Getenv(installLockEnvKey)) == "" {
+	// Installer behavior is covered by explicit tests that override the lock path.
+	if gin.Mode() == gin.TestMode && strings.TrimSpace(installLockPathOverride) == "" {
 		return true
 	}
 	_, err := os.Stat(installLockPath())
@@ -242,19 +243,26 @@ func (h *Handler) InstallRun(c *gin.Context) {
 	}
 
 	// Persist DB config so next boot uses the installed DB even without env vars.
-	type installCfg struct {
-		DB struct {
-			Type string `yaml:"type"`
-			Path string `yaml:"path"`
-			DSN  string `yaml:"dsn"`
-		} `yaml:"db"`
+	configPath := installConfigPath
+	if dir := filepath.Dir(configPath); dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0o755)
 	}
-	var ic installCfg
-	ic.DB.Type = cfg.DBType
-	ic.DB.Path = cfg.DBPath
-	ic.DB.DSN = cfg.DBDSN
-	if b, err := yaml.Marshal(&ic); err == nil {
-		_ = os.WriteFile(installConfigPath, b, 0o600)
+
+	out := map[string]any{}
+	if existing, err := os.ReadFile(configPath); err == nil {
+		_ = yaml.Unmarshal(existing, &out)
+	}
+	// These values are NOT persisted in the config file. They are created/managed via install + DB settings.
+	delete(out, "admin")
+	delete(out, "automation")
+	out["db"] = map[string]any{
+		"type": cfg.DBType,
+		"path": cfg.DBPath,
+		"dsn":  cfg.DBDSN,
+	}
+
+	if b, err := yaml.Marshal(&out); err == nil {
+		_ = os.WriteFile(configPath, b, 0o600)
 	} else if b, err := json.MarshalIndent(map[string]any{
 		"db_type": cfg.DBType,
 		"db_path": cfg.DBPath,
@@ -278,6 +286,6 @@ func (h *Handler) InstallRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"ok":               true,
 		"restart_required": cfg.DBType != "sqlite",
-		"config_file":      installConfigPath,
+		"config_file":      configPath,
 	})
 }

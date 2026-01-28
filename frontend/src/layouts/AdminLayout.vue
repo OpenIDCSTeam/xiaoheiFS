@@ -268,7 +268,7 @@ const menuTree = [
           { key: "/admin/settings/payments", label: "支付设置", icon: CreditCardOutlined, requireAny: ["payment.list"] },
           { key: "/admin/settings/pricing", label: "价格与退款", icon: DollarOutlined, requireAny: ["settings.view"] },
           { key: "/admin/settings/lifecycle", label: "Lifecycle", icon: ClockCircleOutlined, requireAny: ["settings.view"] },
-          { key: "/admin/settings/payment-plugins", label: "支付插件", icon: ToolOutlined, requireAny: ["plugin.upload"] },
+          { key: "/admin/settings/plugins", label: "插件管理", icon: ToolOutlined, requireAny: ["plugin.list"] },
           { key: "/admin/settings/apikey", label: "API Keys", icon: KeyOutlined, requireAny: ["api_key.list"] },
           { key: "/admin/settings/webhook", label: "Webhook", icon: LinkOutlined, requireAny: ["robot.view"] },
           { key: "/admin/automation", label: "自动化对接", icon: ApiOutlined, requireAny: ["automation.view"] }

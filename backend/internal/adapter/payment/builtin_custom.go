@@ -66,6 +66,6 @@ func (p *customProvider) CreatePayment(ctx context.Context, req usecase.PaymentC
 	}, nil
 }
 
-func (p *customProvider) VerifyNotify(ctx context.Context, params map[string]string) (usecase.PaymentNotifyResult, error) {
+func (p *customProvider) VerifyNotify(ctx context.Context, req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error) {
 	return usecase.PaymentNotifyResult{}, errors.New("custom payment does not support notify")
 }

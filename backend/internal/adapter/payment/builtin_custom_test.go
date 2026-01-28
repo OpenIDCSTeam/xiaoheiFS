@@ -25,7 +25,7 @@ func TestCustomProvider(t *testing.T) {
 	if res.Extra["instructions"] == "" {
 		t.Fatalf("expected instructions")
 	}
-	if _, err := provider.VerifyNotify(context.Background(), map[string]string{}); err == nil {
+	if _, err := provider.VerifyNotify(context.Background(), usecase.RawHTTPRequest{}); err == nil {
 		t.Fatalf("expected verify notify error")
 	}
 }

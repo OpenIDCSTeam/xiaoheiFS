@@ -136,6 +136,13 @@ type SettingsRepository interface {
 	DeleteEmailTemplate(ctx context.Context, id int64) error
 }
 
+type PluginInstallationRepository interface {
+	UpsertPluginInstallation(ctx context.Context, inst *domain.PluginInstallation) error
+	GetPluginInstallation(ctx context.Context, category, pluginID string) (domain.PluginInstallation, error)
+	ListPluginInstallations(ctx context.Context) ([]domain.PluginInstallation, error)
+	DeletePluginInstallation(ctx context.Context, category, pluginID string) error
+}
+
 type AuditRepository interface {
 	AddAuditLog(ctx context.Context, log domain.AdminAuditLog) error
 	ListAuditLogs(ctx context.Context, limit, offset int) ([]domain.AdminAuditLog, int, error)
@@ -327,6 +334,7 @@ type WalletOrderRepository interface {
 
 type PaymentCreateRequest struct {
 	OrderID   int64
+	OrderNo   string
 	UserID    int64
 	Amount    int64
 	Currency  string
@@ -346,6 +354,15 @@ type PaymentNotifyResult struct {
 	Paid    bool
 	Amount  int64
 	Raw     map[string]string
+	AckBody string
+}
+
+type RawHTTPRequest struct {
+	Method   string
+	Path     string
+	RawQuery string
+	Headers  map[string][]string
+	Body     []byte
 }
 
 type PaymentProvider interface {
@@ -353,7 +370,7 @@ type PaymentProvider interface {
 	Name() string
 	SchemaJSON() string
 	CreatePayment(ctx context.Context, req PaymentCreateRequest) (PaymentCreateResult, error)
-	VerifyNotify(ctx context.Context, params map[string]string) (PaymentNotifyResult, error)
+	VerifyNotify(ctx context.Context, req RawHTTPRequest) (PaymentNotifyResult, error)
 }
 
 type ConfigurablePaymentProvider interface {

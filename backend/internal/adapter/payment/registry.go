@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/go-plugin"
 
 	paymentplugin "xiaoheiplay/internal/adapter/payment/plugin"
+	plugins "xiaoheiplay/internal/adapter/plugins"
 	"xiaoheiplay/internal/domain"
 	"xiaoheiplay/internal/usecase"
 )
@@ -35,11 +36,12 @@ type providerMeta struct {
 }
 
 type Registry struct {
-	settings  usecase.SettingsRepository
-	pluginDir string
-	dirSpecs  []pluginSpec
-	mu        sync.Mutex
-	plugins   pluginState
+	settings    usecase.SettingsRepository
+	pluginDir   string
+	dirSpecs    []pluginSpec
+	mu          sync.Mutex
+	plugins     pluginState
+	grpcPlugins *plugins.Manager
 }
 
 type pluginState struct {
@@ -55,6 +57,10 @@ type pluginSpec struct {
 
 func NewRegistry(settings usecase.SettingsRepository) *Registry {
 	return &Registry{settings: settings}
+}
+
+func (r *Registry) SetPluginManager(mgr *plugins.Manager) {
+	r.grpcPlugins = mgr
 }
 
 func (r *Registry) SetPluginDir(dir string) {
@@ -128,6 +134,9 @@ func (r *Registry) ListProviders(ctx context.Context, includeDisabled bool) ([]u
 		return nil, err
 	}
 	providers = append(providers, pluginProviders...)
+	if !includeDisabled && r.grpcPlugins != nil {
+		providers = append(providers, r.grpcProviders(ctx)...)
+	}
 	sort.SliceStable(providers, func(i, j int) bool {
 		return providers[i].Key() < providers[j].Key()
 	})
@@ -179,6 +188,11 @@ func (r *Registry) GetProvider(ctx context.Context, key string) (usecase.Payment
 		}
 		return provider, nil
 	}
+	if r.grpcPlugins != nil {
+		if p := r.grpcProviderByKey(ctx, key); p != nil {
+			return p, nil
+		}
+	}
 	return nil, usecase.ErrNotFound
 }
 
@@ -209,11 +223,20 @@ func (r *Registry) GetProviderConfig(ctx context.Context, key string) (string, b
 	if val, ok := configMap[key]; ok && len(val) > 0 {
 		cfg = string(val)
 	}
+	if !enabled && r.grpcPlugins != nil {
+		if p := r.grpcProviderByKey(ctx, key); p != nil {
+			enabled = true
+			cfg = ""
+		}
+	}
 	return cfg, enabled, nil
 }
 
 func (r *Registry) UpdateProviderConfig(ctx context.Context, key string, enabled bool, configJSON string) error {
 	if r.settings == nil {
+		return usecase.ErrInvalidInput
+	}
+	if r.grpcPlugins != nil && strings.Contains(key, ".") {
 		return usecase.ErrInvalidInput
 	}
 	enabledMap, configMap, err := r.loadSettings(ctx)
@@ -528,6 +551,6 @@ func (p *pluginProvider) CreatePayment(ctx context.Context, req usecase.PaymentC
 	return p.provider.CreatePayment(req)
 }
 
-func (p *pluginProvider) VerifyNotify(ctx context.Context, params map[string]string) (usecase.PaymentNotifyResult, error) {
-	return p.provider.VerifyNotify(params)
+func (p *pluginProvider) VerifyNotify(ctx context.Context, req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error) {
+	return p.provider.VerifyNotify(rawToParams(req))
 }

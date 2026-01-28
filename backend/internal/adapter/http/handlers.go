@@ -31,6 +31,7 @@ import (
 	"golang.org/x/image/math/fixed"
 
 	"xiaoheiplay/internal/adapter/email"
+	plugins "xiaoheiplay/internal/adapter/plugins"
 	"xiaoheiplay/internal/adapter/robot"
 	"xiaoheiplay/internal/adapter/sse"
 	"xiaoheiplay/internal/domain"
@@ -86,6 +87,7 @@ type Handler struct {
 	automation    usecase.AutomationClient
 	pluginDir     string
 	pluginPass    string
+	pluginMgr     *plugins.Manager
 	taskSvc       *usecase.ScheduledTaskService
 }
 
@@ -130,6 +132,10 @@ func NewHandler(authSvc *usecase.AuthService, catalogSvc *usecase.CatalogService
 func (h *Handler) SetPaymentPluginConfig(dir, password string) {
 	h.pluginDir = strings.TrimSpace(dir)
 	h.pluginPass = strings.TrimSpace(password)
+}
+
+func (h *Handler) SetPluginManager(mgr *plugins.Manager) {
+	h.pluginMgr = mgr
 }
 
 func (h *Handler) Captcha(c *gin.Context) {
@@ -672,20 +678,26 @@ func (h *Handler) PaymentNotify(c *gin.Context) {
 		return
 	}
 	provider := c.Param("provider")
-	if err := c.Request.ParseForm(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
-		return
+	body, _ := io.ReadAll(c.Request.Body)
+	headers := map[string][]string{}
+	for k, v := range c.Request.Header {
+		copied := make([]string, len(v))
+		copy(copied, v)
+		headers[k] = copied
 	}
-	params := map[string]string{}
-	for key, values := range c.Request.Form {
-		if len(values) == 0 {
-			continue
-		}
-		params[key] = values[0]
-	}
-	result, err := h.paymentSvc.HandleNotify(c, provider, params)
+	result, err := h.paymentSvc.HandleNotify(c, provider, usecase.RawHTTPRequest{
+		Method:   c.Request.Method,
+		Path:     c.Request.URL.Path,
+		RawQuery: c.Request.URL.RawQuery,
+		Headers:  headers,
+		Body:     body,
+	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if result.AckBody != "" {
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(result.AckBody))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "trade_no": result.TradeNo})
@@ -2158,6 +2170,237 @@ func (h *Handler) AdminPaymentPluginUpload(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "path": dst})
+}
+
+func (h *Handler) AdminPluginsList(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	items, err := h.pluginMgr.List(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) AdminPluginsDiscover(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	items, err := h.pluginMgr.DiscoverOnDisk(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) AdminPluginInstall(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
+		return
+	}
+	f, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "open file failed"})
+		return
+	}
+	defer f.Close()
+
+	inst, err := h.pluginMgr.Install(c, file.Filename, f)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Security gate: official signature => allow. Otherwise require admin password confirmation.
+	if inst.SignatureStatus != domain.PluginSignatureOfficial {
+		adminPassword := strings.TrimSpace(c.PostForm("admin_password"))
+		if adminPassword == "" {
+			_ = h.pluginMgr.Uninstall(c, inst.Category, inst.PluginID)
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin_password required for untrusted plugin"})
+			return
+		}
+		if h.authSvc == nil {
+			_ = h.pluginMgr.Uninstall(c, inst.Category, inst.PluginID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "auth disabled"})
+			return
+		}
+		if err := h.authSvc.VerifyPassword(c, getUserID(c), adminPassword); err != nil {
+			_ = h.pluginMgr.Uninstall(c, inst.Category, inst.PluginID)
+			c.JSON(http.StatusForbidden, gin.H{"error": "invalid admin password"})
+			return
+		}
+	}
+
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.install", "plugin", inst.Category+"/"+inst.PluginID, map[string]any{
+			"signature_status": inst.SignatureStatus,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "plugin": inst})
+}
+
+func (h *Handler) AdminPluginImportFromDisk(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+
+	var payload struct {
+		AdminPassword string `json:"admin_password"`
+	}
+	_ = c.ShouldBindJSON(&payload)
+
+	// Peek signature status to decide security gate BEFORE writing DB.
+	targetSig, err := h.pluginMgr.SignatureStatusOnDisk(category, pluginID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if targetSig != domain.PluginSignatureOfficial {
+		adminPassword := strings.TrimSpace(payload.AdminPassword)
+		if adminPassword == "" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin_password required for untrusted plugin"})
+			return
+		}
+		if h.authSvc == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "auth disabled"})
+			return
+		}
+		if err := h.authSvc.VerifyPassword(c, getUserID(c), adminPassword); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "invalid admin password"})
+			return
+		}
+	}
+
+	inst, err := h.pluginMgr.ImportFromDisk(c, category, pluginID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.import", "plugin", inst.Category+"/"+inst.PluginID, map[string]any{
+			"signature_status": inst.SignatureStatus,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "plugin": inst})
+}
+
+func (h *Handler) AdminPluginEnable(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	if err := h.pluginMgr.Enable(c, category, pluginID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.enable", "plugin", category+"/"+pluginID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginDisable(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	if err := h.pluginMgr.Disable(c, category, pluginID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.disable", "plugin", category+"/"+pluginID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginUninstall(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	if err := h.pluginMgr.Uninstall(c, category, pluginID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.uninstall", "plugin", category+"/"+pluginID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginConfigSchema(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	jsonSchema, uiSchema, err := h.pluginMgr.GetConfigSchema(c, category, pluginID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"json_schema": jsonSchema, "ui_schema": uiSchema})
+}
+
+func (h *Handler) AdminPluginConfigGet(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	cfg, err := h.pluginMgr.GetConfig(c, category, pluginID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"config_json": cfg})
+}
+
+func (h *Handler) AdminPluginConfigUpdate(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	var payload struct {
+		ConfigJSON string `json:"config_json"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if err := h.pluginMgr.UpdateConfig(c, category, pluginID, payload.ConfigJSON); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.config_update", "plugin", category+"/"+pluginID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (h *Handler) AdminServerStatus(c *gin.Context) {

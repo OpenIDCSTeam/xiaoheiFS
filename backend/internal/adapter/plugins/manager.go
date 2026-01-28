@@ -1,0 +1,579 @@
+package plugins
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"xiaoheiplay/internal/domain"
+	"xiaoheiplay/internal/pkg/cryptox"
+	"xiaoheiplay/internal/usecase"
+
+	"github.com/hashicorp/go-plugin"
+
+	"xiaoheiplay/pkg/pluginsdk"
+	pluginv1 "xiaoheiplay/plugin/v1"
+)
+
+type Manager struct {
+	baseDir      string
+	officialKeys []ed25519.PublicKey
+	cipher       *cryptox.AESGCM
+	repo         usecase.PluginInstallationRepository
+	runtime      *Runtime
+}
+
+func NewManager(baseDir string, repo usecase.PluginInstallationRepository, cipher *cryptox.AESGCM, officialKeys []ed25519.PublicKey) *Manager {
+	return &Manager{
+		baseDir:      strings.TrimSpace(baseDir),
+		officialKeys: officialKeys,
+		cipher:       cipher,
+		repo:         repo,
+		runtime:      NewRuntime(strings.TrimSpace(baseDir)),
+	}
+}
+
+type ListItem struct {
+	Category        string                       `json:"category"`
+	PluginID        string                       `json:"plugin_id"`
+	Name            string                       `json:"name"`
+	Version         string                       `json:"version"`
+	SignatureStatus domain.PluginSignatureStatus `json:"signature_status"`
+	Enabled         bool                         `json:"enabled"`
+	InstalledAt     time.Time                    `json:"installed_at"`
+	UpdatedAt       time.Time                    `json:"updated_at"`
+	LastHealthAt    *time.Time                   `json:"last_health_at"`
+	HealthStatus    string                       `json:"health_status"`
+	HealthMessage   string                       `json:"health_message"`
+	Capabilities    Manifest                     `json:"manifest"`
+	Entry           EntryInfo                    `json:"entry"`
+}
+
+func (m *Manager) List(ctx context.Context) ([]ListItem, error) {
+	if m.repo == nil {
+		return nil, errors.New("plugin repo missing")
+	}
+	installations, err := m.repo.ListPluginInstallations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ListItem, 0, len(installations))
+	for _, inst := range installations {
+		dir := filepath.Join(m.baseDir, inst.Category, inst.PluginID)
+		manifest, err := ReadManifest(dir)
+		if err != nil {
+			continue
+		}
+		entry, _ := ResolveEntry(dir, manifest)
+		var lastHealthAt *time.Time
+		healthStatus := ""
+		healthMessage := ""
+		if rp, ok := m.runtime.GetRunning(inst.Category, inst.PluginID); ok {
+			rp.mu.Lock()
+			if !rp.lastHealth.IsZero() {
+				t := rp.lastHealth
+				lastHealthAt = &t
+			}
+			if rp.health != nil {
+				healthStatus = rp.health.Status.String()
+				healthMessage = rp.health.Message
+			}
+			rp.mu.Unlock()
+		}
+		out = append(out, ListItem{
+			Category:        inst.Category,
+			PluginID:        inst.PluginID,
+			Name:            manifest.Name,
+			Version:         manifest.Version,
+			SignatureStatus: inst.SignatureStatus,
+			Enabled:         inst.Enabled,
+			InstalledAt:     inst.CreatedAt,
+			UpdatedAt:       inst.UpdatedAt,
+			LastHealthAt:    lastHealthAt,
+			HealthStatus:    healthStatus,
+			HealthMessage:   healthMessage,
+			Capabilities:    manifest,
+			Entry:           entry,
+		})
+	}
+	return out, nil
+}
+
+func (m *Manager) Install(ctx context.Context, filename string, r io.Reader) (domain.PluginInstallation, error) {
+	if m.repo == nil {
+		return domain.PluginInstallation{}, errors.New("plugin repo missing")
+	}
+	res, err := InstallPackage(m.baseDir, filename, r, m.officialKeys)
+	if err != nil {
+		return domain.PluginInstallation{}, err
+	}
+	inst := domain.PluginInstallation{
+		Category:        res.Category,
+		PluginID:        res.PluginID,
+		InstanceID:      newInstanceID(res.Category, res.PluginID),
+		Enabled:         false,
+		SignatureStatus: res.SignatureStatus,
+		ConfigCipher:    "",
+	}
+	if err := m.repo.UpsertPluginInstallation(ctx, &inst); err != nil {
+		_ = os.RemoveAll(res.PluginDir)
+		return domain.PluginInstallation{}, err
+	}
+	return m.repo.GetPluginInstallation(ctx, res.Category, res.PluginID)
+}
+
+func (m *Manager) Uninstall(ctx context.Context, category, pluginID string) error {
+	if m.repo == nil {
+		return errors.New("plugin repo missing")
+	}
+	m.runtime.Stop(category, pluginID)
+	_ = os.RemoveAll(filepath.Join(m.baseDir, category, pluginID))
+	return m.repo.DeletePluginInstallation(ctx, category, pluginID)
+}
+
+func (m *Manager) Enable(ctx context.Context, category, pluginID string) error {
+	if m.repo == nil {
+		return errors.New("plugin repo missing")
+	}
+	inst, err := m.repo.GetPluginInstallation(ctx, category, pluginID)
+	if err != nil {
+		return err
+	}
+	cfg, err := m.decryptConfig(inst.ConfigCipher)
+	if err != nil {
+		return err
+	}
+	if cfg == "" {
+		cfg = "{}"
+	}
+	_, err = m.runtime.Start(ctx, category, pluginID, inst.InstanceID, cfg)
+	if err != nil {
+		return err
+	}
+	inst.Enabled = true
+	return m.repo.UpsertPluginInstallation(ctx, &inst)
+}
+
+func (m *Manager) Disable(ctx context.Context, category, pluginID string) error {
+	if m.repo == nil {
+		return errors.New("plugin repo missing")
+	}
+	m.runtime.Stop(category, pluginID)
+	inst, err := m.repo.GetPluginInstallation(ctx, category, pluginID)
+	if err != nil {
+		return err
+	}
+	inst.Enabled = false
+	return m.repo.UpsertPluginInstallation(ctx, &inst)
+}
+
+func (m *Manager) StartEnabled(ctx context.Context) {
+	if m.repo == nil {
+		return
+	}
+	items, err := m.repo.ListPluginInstallations(ctx)
+	if err != nil {
+		return
+	}
+	for _, inst := range items {
+		if !inst.Enabled {
+			continue
+		}
+		cfg, err := m.decryptConfig(inst.ConfigCipher)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(cfg) == "" {
+			cfg = "{}"
+		}
+		_, _ = m.runtime.Start(ctx, inst.Category, inst.PluginID, inst.InstanceID, cfg)
+	}
+}
+
+func (m *Manager) GetConfigSchema(ctx context.Context, category, pluginID string) (jsonSchema, uiSchema string, err error) {
+	client, core, _, err := m.dialCore(ctx, category, pluginID)
+	if err != nil {
+		return "", "", err
+	}
+	defer client.Kill()
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	resp, err := core.GetConfigSchema(cctx, &pluginv1.Empty{})
+	if err != nil {
+		return "", "", err
+	}
+	return resp.GetJsonSchema(), resp.GetUiSchema(), nil
+}
+
+func (m *Manager) GetConfig(ctx context.Context, category, pluginID string) (string, error) {
+	if m.repo == nil {
+		return "", errors.New("plugin repo missing")
+	}
+	inst, err := m.repo.GetPluginInstallation(ctx, category, pluginID)
+	if err != nil {
+		return "", err
+	}
+	cfg, err := m.decryptConfig(inst.ConfigCipher)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(cfg) == "" {
+		cfg = "{}"
+	}
+	redacted, err := m.redactSecretFields(ctx, category, pluginID, cfg)
+	if err != nil {
+		return "", err
+	}
+	return redacted, nil
+}
+
+func (m *Manager) redactSecretFields(ctx context.Context, category, pluginID string, configJSON string) (string, error) {
+	client, core, _, err := m.dialCore(ctx, category, pluginID)
+	if err != nil {
+		return "", err
+	}
+	defer client.Kill()
+
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	schema, err := core.GetConfigSchema(cctx, &pluginv1.Empty{})
+	if err != nil {
+		return "", err
+	}
+
+	var schemaObj any
+	_ = json.Unmarshal([]byte(schema.GetJsonSchema()), &schemaObj)
+	secretPaths := collectSecretPaths(schemaObj, nil)
+	if len(secretPaths) == 0 {
+		return configJSON, nil
+	}
+
+	var obj any
+	if err := json.Unmarshal([]byte(configJSON), &obj); err != nil {
+		obj = map[string]any{}
+	}
+	for _, path := range secretPaths {
+		obj = setPath(obj, path, "")
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (m *Manager) UpdateConfig(ctx context.Context, category, pluginID string, configJSON string) error {
+	if m.repo == nil {
+		return errors.New("plugin repo missing")
+	}
+	inst, err := m.repo.GetPluginInstallation(ctx, category, pluginID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(configJSON) == "" {
+		configJSON = "{}"
+	}
+
+	oldCfg, err := m.decryptConfig(inst.ConfigCipher)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(oldCfg) == "" {
+		oldCfg = "{}"
+	}
+
+	merged, err := m.mergeSecretFields(ctx, category, pluginID, oldCfg, configJSON)
+	if err != nil {
+		return err
+	}
+	if err := m.validateConfig(ctx, category, pluginID, merged); err != nil {
+		return err
+	}
+	cipherText, err := m.encryptConfig(merged)
+	if err != nil {
+		return err
+	}
+	inst.ConfigCipher = cipherText
+	if err := m.repo.UpsertPluginInstallation(ctx, &inst); err != nil {
+		return err
+	}
+	if inst.Enabled {
+		if rp, ok := m.runtime.GetRunning(category, pluginID); ok && rp.core != nil {
+			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			resp, err := rp.core.ReloadConfig(cctx, &pluginv1.ReloadConfigRequest{ConfigJson: merged})
+			if err != nil {
+				return err
+			}
+			if resp != nil && !resp.Ok {
+				if resp.Error != "" {
+					return errors.New(resp.Error)
+				}
+				return errors.New("plugin reload failed")
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Manager) mergeSecretFields(ctx context.Context, category, pluginID string, oldConfigJSON string, newConfigJSON string) (string, error) {
+	client, core, _, err := m.dialCore(ctx, category, pluginID)
+	if err != nil {
+		return "", err
+	}
+	defer client.Kill()
+
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	schema, err := core.GetConfigSchema(cctx, &pluginv1.Empty{})
+	if err != nil {
+		return "", err
+	}
+
+	var schemaObj any
+	_ = json.Unmarshal([]byte(schema.GetJsonSchema()), &schemaObj)
+	secretPaths := collectSecretPaths(schemaObj, nil)
+	if len(secretPaths) == 0 {
+		return newConfigJSON, nil
+	}
+
+	var oldObj any
+	if err := json.Unmarshal([]byte(oldConfigJSON), &oldObj); err != nil {
+		oldObj = map[string]any{}
+	}
+	var newObj any
+	if err := json.Unmarshal([]byte(newConfigJSON), &newObj); err != nil {
+		return "", errors.New("invalid config json")
+	}
+
+	for _, path := range secretPaths {
+		ov, okO := getPath(oldObj, path)
+		nv, okN := getPath(newObj, path)
+		if !okO || !okN {
+			continue
+		}
+		// "留空表示不修改" for secrets:
+		// - empty string keeps old value
+		// - null keeps old value
+		if nv == nil {
+			newObj = setPath(newObj, path, ov)
+			continue
+		}
+		if s, ok := nv.(string); ok && strings.TrimSpace(s) == "" {
+			newObj = setPath(newObj, path, ov)
+			continue
+		}
+	}
+
+	b, err := json.Marshal(newObj)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func collectSecretPaths(schema any, prefix []string) [][]string {
+	m, ok := schema.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	// Check if this node is a secret field.
+	if format, ok := m["format"].(string); ok && strings.EqualFold(strings.TrimSpace(format), "password") {
+		if len(prefix) > 0 {
+			return [][]string{append([]string{}, prefix...)}
+		}
+	}
+	if v, ok := m["x-secret"].(bool); ok && v {
+		if len(prefix) > 0 {
+			return [][]string{append([]string{}, prefix...)}
+		}
+	}
+
+	props, _ := m["properties"].(map[string]any)
+	if len(props) == 0 {
+		return nil
+	}
+	var out [][]string
+	for k, v := range props {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		out = append(out, collectSecretPaths(v, append(prefix, k))...)
+	}
+	return out
+}
+
+func getPath(obj any, path []string) (any, bool) {
+	cur := obj
+	for _, k := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		v, ok := m[k]
+		if !ok {
+			return nil, false
+		}
+		cur = v
+	}
+	return cur, true
+}
+
+func setPath(obj any, path []string, value any) any {
+	if len(path) == 0 {
+		return obj
+	}
+	m, ok := obj.(map[string]any)
+	if !ok {
+		m = map[string]any{}
+	}
+	cur := m
+	for i := 0; i < len(path)-1; i++ {
+		k := path[i]
+		next, ok := cur[k].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			cur[k] = next
+		}
+		cur = next
+	}
+	cur[path[len(path)-1]] = value
+	return m
+}
+
+func (m *Manager) GetPaymentClient(category, pluginID string) (pluginv1.PaymentServiceClient, bool) {
+	if rp, ok := m.runtime.GetRunning(category, pluginID); ok && rp.payment != nil {
+		return rp.payment, true
+	}
+	return nil, false
+}
+
+func (m *Manager) decryptConfig(cipherText string) (string, error) {
+	if strings.TrimSpace(cipherText) == "" {
+		return "", nil
+	}
+	if m.cipher == nil {
+		return "", errors.New("plugin cipher missing")
+	}
+	plain, err := m.cipher.DecryptString(cipherText)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
+func (m *Manager) encryptConfig(configJSON string) (string, error) {
+	if m.cipher == nil {
+		return "", errors.New("plugin cipher missing")
+	}
+	return m.cipher.EncryptToString([]byte(configJSON))
+}
+
+func ParseEd25519PublicKeys(base64Keys []string) []ed25519.PublicKey {
+	var out []ed25519.PublicKey
+	for _, k := range base64Keys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		b, err := base64.StdEncoding.DecodeString(k)
+		if err != nil || len(b) != ed25519.PublicKeySize {
+			continue
+		}
+		out = append(out, ed25519.PublicKey(b))
+	}
+	return out
+}
+
+func newInstanceID(category, pluginID string) string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	s := strings.TrimRight(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b), "=")
+	return category + "-" + pluginID + "-" + strings.ToLower(s)
+}
+
+func (m *Manager) dialCore(ctx context.Context, category, pluginID string) (*plugin.Client, pluginv1.CoreServiceClient, *pluginv1.Manifest, error) {
+	pluginDir := filepath.Join(m.baseDir, category, pluginID)
+	manifestJSON, err := ReadManifest(pluginDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	entry, err := ResolveEntry(pluginDir, manifestJSON)
+	if err != nil {
+		if len(entry.SupportedPlatforms) > 0 {
+			return nil, nil, nil, errors.New("unsupported platform " + entry.Platform + ", supported: " + strings.Join(entry.SupportedPlatforms, ", "))
+		}
+		return nil, nil, nil, err
+	}
+	cmd := exec.Command(entry.EntryPath)
+	cmd.Dir = pluginDir
+	client := plugin.NewClient(&plugin.ClientConfig{
+		HandshakeConfig: pluginsdk.Handshake,
+		AllowedProtocols: []plugin.Protocol{
+			plugin.ProtocolGRPC,
+		},
+		Plugins: map[string]plugin.Plugin{
+			pluginsdk.PluginKeyCore: &pluginsdk.CoreGRPCPlugin{},
+		},
+		Cmd: cmd,
+	})
+	rpcClient, err := client.Client()
+	if err != nil {
+		client.Kill()
+		return nil, nil, nil, err
+	}
+	rawCore, err := rpcClient.Dispense(pluginsdk.PluginKeyCore)
+	if err != nil {
+		client.Kill()
+		return nil, nil, nil, err
+	}
+	core, ok := rawCore.(pluginv1.CoreServiceClient)
+	if !ok {
+		client.Kill()
+		return nil, nil, nil, errors.New("invalid core client")
+	}
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	manifest, err := core.GetManifest(cctx, &pluginv1.Empty{})
+	if err != nil {
+		client.Kill()
+		return nil, nil, nil, err
+	}
+	if manifest.GetPluginId() == "" {
+		client.Kill()
+		return nil, nil, nil, errors.New("invalid manifest")
+	}
+	return client, core, manifest, nil
+}
+
+func (m *Manager) validateConfig(ctx context.Context, category, pluginID string, configJSON string) error {
+	client, core, _, err := m.dialCore(ctx, category, pluginID)
+	if err != nil {
+		return err
+	}
+	defer client.Kill()
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := core.ValidateConfig(cctx, &pluginv1.ValidateConfigRequest{ConfigJson: configJSON})
+	if err != nil {
+		return err
+	}
+	if resp != nil && !resp.Ok {
+		if resp.Error != "" {
+			return errors.New(resp.Error)
+		}
+		return errors.New("invalid config")
+	}
+	return nil
+}

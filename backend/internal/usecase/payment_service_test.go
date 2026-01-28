@@ -108,10 +108,11 @@ func TestPaymentService_HandleNotifyIdempotent(t *testing.T) {
 	approver := &fakeApprover{}
 	svc := usecase.NewPaymentService(repo, repo, repo, reg, repo, approver, nil)
 
-	if _, err := svc.HandleNotify(context.Background(), "fake", map[string]string{"trade_no": "TN1"}); err != nil {
+	raw := usecase.RawHTTPRequest{Method: "POST", Path: "/payments/notify/fake", RawQuery: "trade_no=TN1"}
+	if _, err := svc.HandleNotify(context.Background(), "fake", raw); err != nil {
 		t.Fatalf("notify: %v", err)
 	}
-	if _, err := svc.HandleNotify(context.Background(), "fake", map[string]string{"trade_no": "TN1"}); err != nil {
+	if _, err := svc.HandleNotify(context.Background(), "fake", raw); err != nil {
 		t.Fatalf("notify 2: %v", err)
 	}
 	updated, err := repo.GetPaymentByTradeNo(context.Background(), "TN1")
@@ -235,7 +236,7 @@ func TestPaymentService_HandleNotifyErrors(t *testing.T) {
 		VerifyRes: usecase.PaymentNotifyResult{TradeNo: "TN-404", Paid: true, Amount: 1000},
 	}, true, "")
 	svc := usecase.NewPaymentService(repo, repo, repo, reg, repo, nil, nil)
-	if _, err := svc.HandleNotify(context.Background(), "bad", map[string]string{"trade_no": "TN-404"}); err == nil {
+	if _, err := svc.HandleNotify(context.Background(), "bad", usecase.RawHTTPRequest{RawQuery: "trade_no=TN-404"}); err == nil {
 		t.Fatalf("expected missing payment error")
 	}
 
@@ -244,7 +245,7 @@ func TestPaymentService_HandleNotifyErrors(t *testing.T) {
 		NameVal:   "Unpaid",
 		VerifyRes: usecase.PaymentNotifyResult{TradeNo: "TN-1", Paid: false, Amount: 1000},
 	}, true, "")
-	if _, err := svc.HandleNotify(context.Background(), "unpaid", map[string]string{"trade_no": "TN-1"}); err != usecase.ErrInvalidInput {
+	if _, err := svc.HandleNotify(context.Background(), "unpaid", usecase.RawHTTPRequest{RawQuery: "trade_no=TN-1"}); err != usecase.ErrInvalidInput {
 		t.Fatalf("expected invalid input, got %v", err)
 	}
 }

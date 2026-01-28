@@ -107,6 +107,23 @@ func (s *AuthService) Login(ctx context.Context, usernameOrEmail string, passwor
 	return user, nil
 }
 
+func (s *AuthService) VerifyPassword(ctx context.Context, userID int64, password string) error {
+	if userID == 0 || password == "" {
+		return ErrInvalidInput
+	}
+	user, err := s.users.GetUserByID(ctx, userID)
+	if err != nil {
+		return ErrUnauthorized
+	}
+	if user.Status != domain.UserStatusActive {
+		return ErrForbidden
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
 func (s *AuthService) UpdateProfile(ctx context.Context, userID int64, in UpdateProfileInput) (domain.User, error) {
 	if userID == 0 {
 		return domain.User{}, ErrInvalidInput

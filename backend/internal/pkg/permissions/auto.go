@@ -42,6 +42,7 @@ var moduleMapping = map[string]moduleMeta{
 	"cms_block":        {Display: "页面模块", SortOrder: 23},
 	"upload":           {Display: "资源上传", SortOrder: 24},
 	"tickets":          {Display: "工单管理", SortOrder: 25},
+	"plugin":           {Display: "Plugin", SortOrder: 26},
 }
 
 var actionFriendlyName = map[string]string{
@@ -330,6 +331,36 @@ func actionFromSegments(method string, segments []string) (string, bool) {
 	}
 	if segments[0] == "plugins" && len(segments) > 2 && segments[2] == "upload" && method == "POST" {
 		return "upload", true
+	}
+	if segments[0] == "plugins" {
+		if len(segments) == 1 && method == "GET" {
+			return "list", true
+		}
+		if len(segments) == 2 && segments[1] == "discover" && method == "GET" {
+			return "list", true
+		}
+		if len(segments) == 2 && segments[1] == "install" && method == "POST" {
+			return "create", true
+		}
+		if len(segments) >= 3 && strings.HasPrefix(segments[1], ":") && strings.HasPrefix(segments[2], ":") {
+			if len(segments) == 3 && method == "DELETE" {
+				return "delete", true
+			}
+			if len(segments) == 4 && (segments[3] == "enable" || segments[3] == "disable") && method == "POST" {
+				return "update", true
+			}
+			if len(segments) == 4 && segments[3] == "import" && method == "POST" {
+				return "create", true
+			}
+			if len(segments) >= 4 && segments[3] == "config" {
+				switch method {
+				case "GET":
+					return "view", true
+				case "PUT", "PATCH":
+					return "update", true
+				}
+			}
+		}
 	}
 	if segments[0] == "server" && len(segments) > 1 && segments[1] == "status" && method == "GET" {
 		return "status", true

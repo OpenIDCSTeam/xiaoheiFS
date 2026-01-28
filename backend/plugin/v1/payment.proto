@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+import "plugin/v1/types.proto";
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PAYMENT_STATUS_PENDING = 1;
+  PAYMENT_STATUS_PAID = 2;
+  PAYMENT_STATUS_FAILED = 3;
+  PAYMENT_STATUS_REFUNDING = 4;
+  PAYMENT_STATUS_REFUNDED = 5;
+  PAYMENT_STATUS_CLOSED = 6;
+}
+
+service PaymentService {
+  rpc ListMethods(Empty) returns (ListMethodsResponse);
+  rpc CreatePayment(CreatePaymentRpcRequest) returns (PaymentCreateResponse);
+  rpc QueryPayment(QueryPaymentRpcRequest) returns (PaymentQueryResponse);
+  rpc Refund(RefundRpcRequest) returns (RefundResponse);
+  rpc VerifyNotify(VerifyNotifyRequest) returns (NotifyVerifyResult);
+}
+
+message ListMethodsResponse {
+  repeated string methods = 1;
+}
+
+message PaymentCreateRequest {
+  string order_no = 1;
+  string user_id = 2;
+  int64 amount = 3;
+  string currency = 4;
+  string subject = 5;
+  string return_url = 6;
+  string notify_url = 7;
+  map<string, string> extra = 8;
+}
+
+message CreatePaymentRpcRequest {
+  string method = 1;
+  PaymentCreateRequest request = 2;
+}
+
+message PaymentCreateResponse {
+  bool ok = 1;
+  string trade_no = 2;
+  string pay_url = 3;
+  map<string, string> extra = 4;
+  string error = 5;
+}
+
+message QueryPaymentRpcRequest {
+  string method = 1;
+  string trade_no = 2;
+  string order_no = 3;
+}
+
+message PaymentQueryResponse {
+  bool ok = 1;
+  PaymentStatus status = 2;
+  string trade_no = 3;
+  int64 amount = 4;
+  string raw_json = 10;
+  string error = 20;
+}
+
+message RefundRpcRequest {
+  string method = 1;
+  string trade_no = 2;
+  string refund_no = 3;
+  int64 amount = 4;
+  string reason = 5;
+}
+
+message RefundResponse {
+  bool ok = 1;
+  string refund_no = 2;
+  PaymentStatus status = 3;
+  string raw_json = 10;
+  string error = 20;
+}
+
+message VerifyNotifyRequest {
+  string method = 1;
+  RawHttpRequest raw = 2;
+}
+
+message NotifyVerifyResult {
+  bool ok = 1;
+  string order_no = 2;
+  string trade_no = 3;
+  int64 amount = 4;
+  PaymentStatus status = 5;
+  int64 paid_at_unix = 6;
+  string payer = 7;
+
+  string raw_json = 20;
+  string ack_body = 21;
+
+  string error = 30;
+}

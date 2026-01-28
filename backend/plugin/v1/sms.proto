@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+service SmsService {
+  rpc Send(SendSmsRequest) returns (SendSmsResponse);
+}
+
+message SendSmsRequest {
+  string template_id = 1;
+  map<string, string> vars = 2;
+  repeated string phones = 3;
+  string content = 4;
+}
+
+message SendSmsResponse {
+  bool ok = 1;
+  string message_id = 2;
+  string error = 3;
+}

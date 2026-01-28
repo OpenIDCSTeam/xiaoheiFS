@@ -12,43 +12,24 @@ Backend supports a local YAML config file for basic settings (bind address, site
 
 Load order (later wins):
 1) Defaults
-2) Config file (`APP_CONFIG_PATH`, or `app.config.yaml`, then `app.config.yml`, then legacy `app.config.json`)
-3) Environment variables
+2) Config file (`app.config.yaml`, then `app.config.yml`, then legacy `app.config.json`)
 
 Example `app.config.yaml`:
 
 ```yaml
 addr: ":8080"
 api_base_url: "http://localhost:8080"
-site:
-  name: "小黑云控制台"
-  url: "https://example.com"
 db:
   type: "sqlite"
   path: "./data/app.db"
   dsn: ""
-admin:
-  user: "admin"
-  pass: "admin123"
-jwt_secret: "dev_secret"
-automation:
-  base_url: "https://idc.example.com/index.php/api/cloud"
-  api_key: "xxx"
 ```
 
-Environment variables:
-- `APP_ADDR` (default `:8080`)
-- `APP_DB_TYPE` (default `sqlite`)
-- `APP_DB_PATH` (default `./data/app.db`)
-- `APP_DB_DSN` (default empty)
-- `SITE_NAME` (default empty; also written into DB setting `site_name` on startup)
-- `SITE_URL` (default empty; also written into DB setting `site_url` on startup)
-- `ADMIN_USER` (default `admin`)
-- `ADMIN_PASS` (default `admin123`)
-- `ADMIN_JWT_SECRET` (default `dev_secret`)
-- `API_BASE_URL` (default `http://localhost:8080`)
-- `AUTOMATION_BASE_URL` (default `https://idc.duncai.top/index.php/api/cloud`)
-- `AUTOMATION_API_KEY` (required for automation calls)
+Notes:
+- The config file is for non-sensitive runtime settings (bind address/db/etc.).
+- `jwt_secret` is auto-generated on first run if missing, and written into the config file.
+- The installer (`POST /api/v1/install`) creates the first admin user in the database (password stored as a bcrypt hash); admin credentials are not stored in the config file.
+- Integration settings (e.g. automation base URL / API key) are stored in the database `settings` table and can be managed from the admin APIs/UI.
 
 ## Docs
 
@@ -57,6 +38,8 @@ go run ./cmd/tools/gendocs
 ```
 
 This updates `docs/openapi.yaml` and `docs/api.md`.
+
+Plugin system (go-plugin GRPC + protobuf) migration notes: `docs/plugin-system-migration.md`.
 
 ## Examples
 

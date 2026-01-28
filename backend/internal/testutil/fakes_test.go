@@ -81,7 +81,7 @@ func TestFakePaymentProvider(t *testing.T) {
 	if _, err := p.CreatePayment(context.Background(), usecase.PaymentCreateRequest{}); err != nil {
 		t.Fatalf("create payment: %v", err)
 	}
-	if _, err := p.VerifyNotify(context.Background(), map[string]string{"trade_no": "t"}); err != nil {
+	if _, err := p.VerifyNotify(context.Background(), usecase.RawHTTPRequest{RawQuery: "trade_no=t"}); err != nil {
 		t.Fatalf("verify notify: %v", err)
 	}
 }

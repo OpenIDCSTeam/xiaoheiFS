@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+import "plugin/v1/types.proto";
+import "plugin/v1/manifest.proto";
+
+service CoreService {
+  rpc GetManifest(Empty) returns (Manifest);
+  rpc GetConfigSchema(Empty) returns (ConfigSchema);
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  rpc Init(InitRequest) returns (InitResponse);
+  rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+  rpc Health(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message ValidateConfigRequest {
+  string config_json = 1;
+}
+
+message ValidateConfigResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message InitRequest {
+  string instance_id = 1;
+  string config_json = 2;
+}
+
+message InitResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message ReloadConfigRequest {
+  string config_json = 1;
+}
+
+message ReloadConfigResponse {
+  bool ok = 1;
+  string error = 2;
+}

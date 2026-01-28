@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"strings"
@@ -15,84 +17,71 @@ const (
 )
 
 type Config struct {
-	Addr              string
-	DBType            string
-	DBPath            string
-	DBDSN             string
-	AdminUser         string
-	AdminPass         string
-	JWTSecret         string
-	APIBase           string
-	SiteName          string
-	SiteURL           string
-	AutomationBaseURL string
-	AutomationAPIKey  string
+	Addr               string
+	DBType             string
+	DBPath             string
+	DBDSN              string
+	AdminUser          string
+	AdminPass          string
+	JWTSecret          string
+	PluginMasterKey    string
+	PluginOfficialKeys []string
+	APIBase            string
+	SiteName           string
+	SiteURL            string
+	AutomationBaseURL  string
+	AutomationAPIKey   string
 }
 
 type fileConfig struct {
-	Addr      string `json:"addr" yaml:"addr"`
-	APIBase   string `json:"api_base_url" yaml:"api_base_url"`
-	JWTSecret string `json:"jwt_secret" yaml:"jwt_secret"`
+	Addr    string `json:"addr" yaml:"addr"`
+	APIBase string `json:"api_base_url" yaml:"api_base_url"`
 
-	Admin struct {
-		User string `json:"user" yaml:"user"`
-		Pass string `json:"pass" yaml:"pass"`
-	} `json:"admin" yaml:"admin"`
+	JWTSecret          string   `json:"jwt_secret" yaml:"jwt_secret"`
+	PluginMasterKey    string   `json:"plugin_master_key" yaml:"plugin_master_key"`
+	PluginOfficialKeys []string `json:"plugin_official_ed25519_pubkeys" yaml:"plugin_official_ed25519_pubkeys"`
 
 	DB struct {
 		Type string `json:"type" yaml:"type"`
 		Path string `json:"path" yaml:"path"`
 		DSN  string `json:"dsn" yaml:"dsn"`
 	} `json:"db" yaml:"db"`
-
-	Site struct {
-		Name string `json:"name" yaml:"name"`
-		URL  string `json:"url" yaml:"url"`
-	} `json:"site" yaml:"site"`
-
-	Automation struct {
-		BaseURL string `json:"base_url" yaml:"base_url"`
-		APIKey  string `json:"api_key" yaml:"api_key"`
-	} `json:"automation" yaml:"automation"`
 }
 
 func Load() Config {
 	cfg := Config{
-		Addr:              ":8080",
-		DBType:            "sqlite",
-		DBPath:            "./data/app.db",
-		DBDSN:             "",
-		AdminUser:         "admin",
-		AdminPass:         "admin123",
-		JWTSecret:         "dev_secret",
-		APIBase:           "http://localhost:8080",
-		SiteName:          "",
-		SiteURL:           "",
-		AutomationBaseURL: "https://idc.duncai.top/index.php/api/cloud",
-		AutomationAPIKey:  "zPVhku8TueXcQbTcsdcu",
+		Addr:               ":8080",
+		DBType:             "sqlite",
+		DBPath:             "./data/app.db",
+		DBDSN:              "",
+		AdminUser:          "admin",
+		AdminPass:          "admin123",
+		JWTSecret:          "",
+		PluginMasterKey:    "",
+		PluginOfficialKeys: nil,
+		APIBase:            "http://localhost:8080",
+		SiteName:           "",
+		SiteURL:            "",
+		AutomationBaseURL:  "",
+		AutomationAPIKey:   "",
 	}
 
 	applyFileConfig(&cfg, readLocalConfig())
 
-	cfg.Addr = getEnv("APP_ADDR", cfg.Addr)
-	cfg.DBType = getEnv("APP_DB_TYPE", cfg.DBType)
-	cfg.DBPath = getEnv("APP_DB_PATH", cfg.DBPath)
-	cfg.DBDSN = getEnv("APP_DB_DSN", cfg.DBDSN)
-	cfg.AdminUser = getEnv("ADMIN_USER", cfg.AdminUser)
-	cfg.AdminPass = getEnv("ADMIN_PASS", cfg.AdminPass)
-	cfg.JWTSecret = getEnv("ADMIN_JWT_SECRET", cfg.JWTSecret)
-	cfg.APIBase = getEnv("API_BASE_URL", cfg.APIBase)
-	cfg.SiteName = getEnv("SITE_NAME", cfg.SiteName)
-	cfg.SiteURL = getEnv("SITE_URL", cfg.SiteURL)
-	cfg.AutomationBaseURL = getEnv("AUTOMATION_BASE_URL", cfg.AutomationBaseURL)
-	cfg.AutomationAPIKey = getEnv("AUTOMATION_API_KEY", cfg.AutomationAPIKey)
+	if strings.TrimSpace(cfg.JWTSecret) == "" {
+		cfg.JWTSecret = generateSecret()
+		_ = persistJWTSecret(cfg.JWTSecret)
+	}
+	if strings.TrimSpace(cfg.PluginMasterKey) == "" {
+		cfg.PluginMasterKey = generateSecret()
+		_ = persistPluginMasterKey(cfg.PluginMasterKey)
+	}
 
 	return cfg
 }
 
 func readLocalConfig() *fileConfig {
-	configPath := strings.TrimSpace(os.Getenv("APP_CONFIG_PATH"))
-	candidates := []string{configPath, localConfigYAML, localConfigYML, localConfigJSON}
+	candidates := []string{localConfigYAML, localConfigYML, localConfigJSON}
 
 	for _, p := range candidates {
 		if strings.TrimSpace(p) == "" {
@@ -151,11 +140,11 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if strings.TrimSpace(fc.JWTSecret) != "" {
 		cfg.JWTSecret = strings.TrimSpace(fc.JWTSecret)
 	}
-	if strings.TrimSpace(fc.Admin.User) != "" {
-		cfg.AdminUser = strings.TrimSpace(fc.Admin.User)
+	if strings.TrimSpace(fc.PluginMasterKey) != "" {
+		cfg.PluginMasterKey = strings.TrimSpace(fc.PluginMasterKey)
 	}
-	if strings.TrimSpace(fc.Admin.Pass) != "" {
-		cfg.AdminPass = strings.TrimSpace(fc.Admin.Pass)
+	if len(fc.PluginOfficialKeys) > 0 {
+		cfg.PluginOfficialKeys = fc.PluginOfficialKeys
 	}
 	if strings.TrimSpace(fc.DB.Type) != "" {
 		cfg.DBType = strings.TrimSpace(fc.DB.Type)
@@ -166,23 +155,91 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	if strings.TrimSpace(fc.DB.DSN) != "" {
 		cfg.DBDSN = strings.TrimSpace(fc.DB.DSN)
 	}
-	if strings.TrimSpace(fc.Site.Name) != "" {
-		cfg.SiteName = strings.TrimSpace(fc.Site.Name)
-	}
-	if strings.TrimSpace(fc.Site.URL) != "" {
-		cfg.SiteURL = strings.TrimSpace(fc.Site.URL)
-	}
-	if strings.TrimSpace(fc.Automation.BaseURL) != "" {
-		cfg.AutomationBaseURL = strings.TrimSpace(fc.Automation.BaseURL)
-	}
-	if strings.TrimSpace(fc.Automation.APIKey) != "" {
-		cfg.AutomationAPIKey = strings.TrimSpace(fc.Automation.APIKey)
-	}
 }
 
-func getEnv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func generateSecret() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func persistJWTSecret(secret string) error {
+	path := localConfigYAML
+	switch {
+	case fileExists(localConfigYAML):
+		path = localConfigYAML
+	case fileExists(localConfigYML):
+		path = localConfigYML
+	case fileExists(localConfigJSON):
+		path = localConfigJSON
+	default:
+		path = localConfigYAML
 	}
-	return def
+
+	if strings.HasSuffix(strings.ToLower(path), ".json") {
+		out := map[string]any{}
+		if existing, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(existing, &out)
+		}
+		out["jwt_secret"] = secret
+		b, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path, b, 0o600)
+	}
+
+	out := map[string]any{}
+	if existing, err := os.ReadFile(path); err == nil {
+		_ = yaml.Unmarshal(existing, &out)
+	}
+	out["jwt_secret"] = secret
+	b, err := yaml.Marshal(&out)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o600)
+}
+
+func persistPluginMasterKey(key string) error {
+	path := localConfigYAML
+	switch {
+	case fileExists(localConfigYAML):
+		path = localConfigYAML
+	case fileExists(localConfigYML):
+		path = localConfigYML
+	case fileExists(localConfigJSON):
+		path = localConfigJSON
+	default:
+		path = localConfigYAML
+	}
+
+	if strings.HasSuffix(strings.ToLower(path), ".json") {
+		out := map[string]any{}
+		if existing, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(existing, &out)
+		}
+		out["plugin_master_key"] = key
+		b, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path, b, 0o600)
+	}
+
+	out := map[string]any{}
+	if existing, err := os.ReadFile(path); err == nil {
+		_ = yaml.Unmarshal(existing, &out)
+	}
+	out["plugin_master_key"] = key
+	b, err := yaml.Marshal(&out)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o600)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

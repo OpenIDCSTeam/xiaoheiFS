@@ -3,6 +3,55 @@ export interface ApiList<T> {
   total?: number;
 }
 
+export type PluginSignatureStatus = "official" | "untrusted" | "unsigned";
+
+export interface PluginManifest {
+  plugin_id?: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  capabilities?: {
+    sms?: { send?: boolean } | null;
+    payment?: { methods?: string[] } | null;
+    kyc?: { start?: boolean; query_result?: boolean } | null;
+  };
+}
+
+export interface PluginListItem {
+  category?: string;
+  plugin_id?: string;
+  name?: string;
+  version?: string;
+  signature_status?: PluginSignatureStatus;
+  enabled?: boolean;
+  installed_at?: string;
+  updated_at?: string;
+  last_health_at?: string | null;
+  health_status?: string;
+  health_message?: string;
+  manifest?: PluginManifest;
+  entry?: {
+    platform?: string;
+    entry_path?: string;
+    entry_supported?: boolean;
+    supported_platforms?: string[];
+  };
+}
+
+export interface PluginDiscoverItem {
+  category?: string;
+  plugin_id?: string;
+  name?: string;
+  version?: string;
+  signature_status?: PluginSignatureStatus;
+  entry?: {
+    platform?: string;
+    entry_path?: string;
+    entry_supported?: boolean;
+    supported_platforms?: string[];
+  };
+}
+
 export interface CaptchaResponse {
   captcha_id?: string;
   image_base64?: string;

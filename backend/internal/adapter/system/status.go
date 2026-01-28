@@ -29,10 +29,7 @@ func (p *Provider) Status(ctx context.Context) (usecase.ServerStatus, error) {
 	usage, _ := cpu.PercentWithContext(ctx, 200*time.Millisecond, false)
 	vm, _ := mem.VirtualMemoryWithContext(ctx)
 
-	diskPath := strings.TrimSpace(os.Getenv("SERVER_STATUS_DISK_PATH"))
-	if diskPath == "" {
-		diskPath = defaultDiskPath()
-	}
+	diskPath := defaultDiskPath()
 	du, _ := disk.UsageWithContext(ctx, diskPath)
 
 	status := usecase.ServerStatus{

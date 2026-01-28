@@ -1100,6 +1100,79 @@ func (r *SQLiteRepo) ListSettings(ctx context.Context) ([]domain.Setting, error)
 	return out, nil
 }
 
+func (r *SQLiteRepo) UpsertPluginInstallation(ctx context.Context, inst *domain.PluginInstallation) error {
+	if inst == nil || strings.TrimSpace(inst.Category) == "" || strings.TrimSpace(inst.PluginID) == "" || strings.TrimSpace(inst.InstanceID) == "" {
+		return usecase.ErrInvalidInput
+	}
+	if r.gdb == nil {
+		_, err := r.db.ExecContext(ctx, `INSERT INTO plugin_installations(category,plugin_id,instance_id,enabled,signature_status,config_cipher,created_at,updated_at)
+			VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+			ON CONFLICT(category,plugin_id) DO UPDATE SET instance_id = excluded.instance_id, enabled = excluded.enabled, signature_status = excluded.signature_status, config_cipher = excluded.config_cipher, updated_at = CURRENT_TIMESTAMP`,
+			inst.Category, inst.PluginID, inst.InstanceID, boolToInt(inst.Enabled), inst.SignatureStatus, inst.ConfigCipher,
+		)
+		return err
+	}
+	m := pluginInstallationModel{
+		Category:        inst.Category,
+		PluginID:        inst.PluginID,
+		InstanceID:      inst.InstanceID,
+		Enabled:         boolToInt(inst.Enabled),
+		SignatureStatus: string(inst.SignatureStatus),
+		ConfigCipher:    inst.ConfigCipher,
+	}
+	return r.gdb.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "category"}, {Name: "plugin_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"instance_id",
+				"enabled",
+				"signature_status",
+				"config_cipher",
+				"updated_at",
+			}),
+		}).
+		Create(&m).Error
+}
+
+func (r *SQLiteRepo) GetPluginInstallation(ctx context.Context, category, pluginID string) (domain.PluginInstallation, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT id, category, plugin_id, instance_id, enabled, signature_status, config_cipher, created_at, updated_at FROM plugin_installations WHERE category = ? AND plugin_id = ?`, category, pluginID)
+	var inst domain.PluginInstallation
+	var enabled int
+	var sig string
+	if err := row.Scan(&inst.ID, &inst.Category, &inst.PluginID, &inst.InstanceID, &enabled, &sig, &inst.ConfigCipher, &inst.CreatedAt, &inst.UpdatedAt); err != nil {
+		return domain.PluginInstallation{}, r.ensure(err)
+	}
+	inst.Enabled = enabled != 0
+	inst.SignatureStatus = domain.PluginSignatureStatus(sig)
+	return inst, nil
+}
+
+func (r *SQLiteRepo) ListPluginInstallations(ctx context.Context) ([]domain.PluginInstallation, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, category, plugin_id, instance_id, enabled, signature_status, config_cipher, created_at, updated_at FROM plugin_installations ORDER BY category ASC, plugin_id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.PluginInstallation
+	for rows.Next() {
+		var inst domain.PluginInstallation
+		var enabled int
+		var sig string
+		if err := rows.Scan(&inst.ID, &inst.Category, &inst.PluginID, &inst.InstanceID, &enabled, &sig, &inst.ConfigCipher, &inst.CreatedAt, &inst.UpdatedAt); err != nil {
+			return nil, err
+		}
+		inst.Enabled = enabled != 0
+		inst.SignatureStatus = domain.PluginSignatureStatus(sig)
+		out = append(out, inst)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepo) DeletePluginInstallation(ctx context.Context, category, pluginID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM plugin_installations WHERE category = ? AND plugin_id = ?`, category, pluginID)
+	return err
+}
+
 func (r *SQLiteRepo) ListEmailTemplates(ctx context.Context) ([]domain.EmailTemplate, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT id, name, subject, body, enabled, created_at, updated_at FROM email_templates ORDER BY id DESC`)
 	if err != nil {
@@ -2762,6 +2835,20 @@ type settingModel struct {
 }
 
 func (settingModel) TableName() string { return "settings" }
+
+type pluginInstallationModel struct {
+	ID              int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	Category        string    `gorm:"column:category;uniqueIndex:idx_plugin_installations_cat_id"`
+	PluginID        string    `gorm:"column:plugin_id;uniqueIndex:idx_plugin_installations_cat_id"`
+	InstanceID      string    `gorm:"column:instance_id"`
+	Enabled         int       `gorm:"column:enabled"`
+	SignatureStatus string    `gorm:"column:signature_status"`
+	ConfigCipher    string    `gorm:"column:config_cipher"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at"`
+}
+
+func (pluginInstallationModel) TableName() string { return "plugin_installations" }
 
 type provisionJobModel struct {
 	ID          int64     `gorm:"primaryKey;autoIncrement;column:id"`

@@ -44,6 +44,6 @@ func (p *simpleProvider) CreatePayment(ctx context.Context, req usecase.PaymentC
 	return usecase.PaymentCreateResult{}, errors.New("provider does not create payments")
 }
 
-func (p *simpleProvider) VerifyNotify(ctx context.Context, params map[string]string) (usecase.PaymentNotifyResult, error) {
+func (p *simpleProvider) VerifyNotify(ctx context.Context, req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error) {
 	return usecase.PaymentNotifyResult{}, errors.New("provider does not handle notify")
 }

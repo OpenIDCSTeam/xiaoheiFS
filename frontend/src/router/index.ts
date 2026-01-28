@@ -108,9 +108,14 @@ const router = createRouter({
         { path: "settings/pricing", name: "admin-settings-pricing", component: () => import("@/pages/admin/settings/Pricing.vue") },
         { path: "settings/lifecycle", name: "admin-settings-lifecycle", component: () => import("@/pages/admin/settings/Lifecycle.vue") },
         {
+          path: "settings/plugins",
+          name: "admin-settings-plugins",
+          component: () => import("@/pages/admin/settings/Plugins.vue")
+        },
+        {
           path: "settings/payment-plugins",
           name: "admin-settings-payment-plugins",
-          component: () => import("@/pages/admin/settings/PaymentPlugins.vue")
+          redirect: { name: "admin-settings-plugins" }
         },
         { path: "realname/providers", name: "admin-realname-providers", component: () => import("@/pages/admin/realname/Providers.vue") },
         { path: "realname/config", name: "admin-realname-config", component: () => import("@/pages/admin/realname/Config.vue") },

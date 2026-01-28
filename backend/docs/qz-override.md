@@ -17,8 +17,7 @@
 3) 确认轻舟侧的 `web.apikey`（或同等配置）已设置
    - 该 controller 会校验请求头 `apikey`（除 `panel` 动作外）
 4) 在本项目后端配置自动化地址与 key（示例）：
-   - `automation.base_url: "https://<your-qz-host>/index.php/api/cloud"`
-   - `automation.api_key: "<your-apikey>"`
+   - 在控制台后台「集成/自动化」里配置（写入数据库 settings）：`automation_base_url` / `automation_api_key`
 
 后端配置支持 `app.config.yaml`（见 `backend/README.md:1`）。
 
@@ -27,15 +26,14 @@
 - `backend/internal/adapter/automation/client.go:1`
 
 关键点：
-- Header：`apikey: <AUTOMATION_API_KEY>`
+- Header：`apikey: <automation_api_key>`
 - BaseURL：拼接诸如 `/create_host`、`/hostinfo` 等端点（因此 BaseURL 需要指向 `.../api/cloud`）
 
 ## 常见问题
 ### 1) 从后端调用返回 apikey 错误
-- 确认轻舟侧 `web.apikey` 与后端 `AUTOMATION_API_KEY`（或 YAML 的 `automation.api_key`）一致
+- 确认轻舟侧 `web.apikey` 与后端数据库 settings 的 `automation_api_key` 一致
 - 确认请求确实带了 header `apikey`（后端默认会带）
 
 ### 2) BaseURL 填错（404 或接口不生效）
 - 正确示例：`https://host/index.php/api/cloud`
 - 错误示例：只填到 `https://host/` 或漏掉 `index.php/api/cloud`
-

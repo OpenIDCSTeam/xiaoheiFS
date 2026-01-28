@@ -8,21 +8,20 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"xiaoheiplay/internal/adapter/automation"
 	"xiaoheiplay/internal/adapter/email"
 	"xiaoheiplay/internal/adapter/event"
 	"xiaoheiplay/internal/adapter/http"
 	"xiaoheiplay/internal/adapter/payment"
+	"xiaoheiplay/internal/adapter/plugins"
 	"xiaoheiplay/internal/adapter/realname"
 	"xiaoheiplay/internal/adapter/repo"
 	"xiaoheiplay/internal/adapter/robot"
 	"xiaoheiplay/internal/adapter/seed"
 	"xiaoheiplay/internal/adapter/sse"
 	"xiaoheiplay/internal/adapter/system"
-	"xiaoheiplay/internal/domain"
 	"xiaoheiplay/internal/pkg/config"
+	"xiaoheiplay/internal/pkg/cryptox"
 	"xiaoheiplay/internal/pkg/db"
 	"xiaoheiplay/internal/pkg/permissions"
 	"xiaoheiplay/internal/usecase"
@@ -72,26 +71,6 @@ func main() {
 	}
 
 	repoSQLite := repo.NewSQLiteRepo(conn.Gorm)
-	if isInstalled() {
-		if _, userSet := os.LookupEnv("ADMIN_USER"); userSet {
-			if _, passSet := os.LookupEnv("ADMIN_PASS"); passSet {
-				ensureAdminUser(repoSQLite, cfg.AdminUser, cfg.AdminPass)
-			}
-		}
-	}
-	if v, ok := os.LookupEnv("AUTOMATION_BASE_URL"); ok && v != "" {
-		_ = repoSQLite.UpsertSetting(context.Background(), domain.Setting{Key: "automation_base_url", ValueJSON: v})
-	}
-	if v, ok := os.LookupEnv("AUTOMATION_API_KEY"); ok && v != "" {
-		_ = repoSQLite.UpsertSetting(context.Background(), domain.Setting{Key: "automation_api_key", ValueJSON: v})
-		_ = repoSQLite.UpsertSetting(context.Background(), domain.Setting{Key: "automation_enabled", ValueJSON: "true"})
-	}
-	if strings.TrimSpace(cfg.SiteName) != "" {
-		_ = repoSQLite.UpsertSetting(context.Background(), domain.Setting{Key: "site_name", ValueJSON: strings.TrimSpace(cfg.SiteName)})
-	}
-	if strings.TrimSpace(cfg.SiteURL) != "" {
-		_ = repoSQLite.UpsertSetting(context.Background(), domain.Setting{Key: "site_url", ValueJSON: strings.TrimSpace(cfg.SiteURL)})
-	}
 
 	catalogSvc := usecase.NewCatalogService(repoSQLite, repoSQLite, repoSQLite)
 	cartSvc := usecase.NewCartService(repoSQLite, repoSQLite, repoSQLite)
@@ -118,7 +97,16 @@ func main() {
 	passwordResetSvc := usecase.NewPasswordResetService(repoSQLite, repoSQLite, emailSender, repoSQLite)
 	walletSvc := usecase.NewWalletService(repoSQLite, repoSQLite)
 	walletOrderSvc := usecase.NewWalletOrderService(repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, automationClient, repoSQLite)
+	pluginCipher, err := cryptox.NewAESGCM(cfg.PluginMasterKey)
+	if err != nil {
+		log.Fatalf("plugin cipher: %v", err)
+	}
+	pluginMgr := plugins.NewManager("plugins", repoSQLite, pluginCipher, plugins.ParseEd25519PublicKeys(cfg.PluginOfficialKeys))
+	_ = pluginMgr.BootstrapFromDisk(context.Background(), repoSQLite)
+	pluginMgr.StartEnabled(context.Background())
+
 	paymentRegistry := payment.NewRegistry(repoSQLite)
+	paymentRegistry.SetPluginManager(pluginMgr)
 	paymentSvc := usecase.NewPaymentService(repoSQLite, repoSQLite, repoSQLite, paymentRegistry, repoSQLite, orderSvc, eventBus)
 	statusSvc := usecase.NewServerStatusService(system.NewProvider())
 	taskSvc := usecase.NewScheduledTaskService(repoSQLite, vpsSvc, orderSvc, notifySvc, repoSQLite)
@@ -134,6 +122,7 @@ func main() {
 
 	handler := http.NewHandlerWithServices(authSvc, catalogSvc, cartSvc, orderSvc, vpsSvc, adminSvc, adminVPSSvc, integrationSvc, reportSvc, cmsSvc, ticketSvc, walletSvc, walletOrderSvc, paymentSvc, messageSvc, statusSvc, realnameSvc, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, broker, cfg.JWTSecret, automationClient, passwordResetSvc, permissionSvc, taskSvc)
 	handler.SetPaymentPluginConfig(pluginDir, pluginPassword)
+	handler.SetPluginManager(pluginMgr)
 	middleware := http.NewMiddleware(cfg.JWTSecret, apiKeySvc, permissionSvc)
 	server := http.NewServer(handler, middleware)
 
@@ -147,36 +136,6 @@ func main() {
 	if err := server.Engine.Run(cfg.Addr); err != nil {
 		log.Fatalf("server: %v", err)
 	}
-}
-
-func isInstalled() bool {
-	lockPath := strings.TrimSpace(os.Getenv("APP_INSTALL_LOCK_PATH"))
-	if lockPath == "" {
-		lockPath = "install.lock"
-	}
-	_, err := os.Stat(lockPath)
-	return err == nil
-}
-
-func ensureAdminUser(repo *repo.SQLiteRepo, username, password string) {
-	if username == "" || password == "" {
-		return
-	}
-	ctx := context.Background()
-	if _, err := repo.GetUserByUsernameOrEmail(ctx, username); err == nil {
-		return
-	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	superAdminGroupID := int64(1)
-	user := &domain.User{
-		Username:          username,
-		Email:             username + "@local",
-		PasswordHash:      string(hash),
-		Role:              domain.UserRoleAdmin,
-		Status:            domain.UserStatusActive,
-		PermissionGroupID: &superAdminGroupID,
-	}
-	_ = repo.CreateUser(ctx, user)
 }
 
 func getSettingValue(repo *repo.SQLiteRepo, key string) string {

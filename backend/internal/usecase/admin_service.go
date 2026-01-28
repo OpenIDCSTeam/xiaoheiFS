@@ -129,6 +129,19 @@ func (s *AdminService) ListAuditLogs(ctx context.Context, limit, offset int) ([]
 	return s.audit.ListAuditLogs(ctx, limit, offset)
 }
 
+func (s *AdminService) Audit(ctx context.Context, adminID int64, action, targetType, targetID string, detail any) {
+	if s.audit == nil {
+		return
+	}
+	_ = s.audit.AddAuditLog(ctx, domain.AdminAuditLog{
+		AdminID:    adminID,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		DetailJSON: mustJSON(detail),
+	})
+}
+
 func (s *AdminService) UpdateUserStatus(ctx context.Context, adminID int64, userID int64, status domain.UserStatus) error {
 	if err := s.users.UpdateUserStatus(ctx, userID, status); err != nil {
 		return err

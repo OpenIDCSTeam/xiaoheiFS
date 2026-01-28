@@ -296,8 +296,8 @@ func payWithProvider(t *testing.T, env *testutilhttp.Env, token string, orderID 
 			PayURL:  "https://pay.local",
 			TradeNo: "TN-E2E",
 		},
-		VerifyFunc: func(params map[string]string) (usecase.PaymentNotifyResult, error) {
-			return usecase.PaymentNotifyResult{TradeNo: params["trade_no"], Paid: true, Amount: 1000}, nil
+		VerifyFunc: func(req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error) {
+			return usecase.PaymentNotifyResult{TradeNo: "TN-E2E", Paid: true, Amount: 1000}, nil
 		},
 	}, true, "")
 	pay := testutil.DoJSON(t, env.Router, http.MethodPost, "/api/v1/orders/"+testutil.Itoa(orderID)+"/pay", map[string]any{

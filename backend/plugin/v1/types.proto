@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+message Empty {}
+
+message StringList {
+  repeated string values = 1;
+}
+
+// RawHttpRequest is the original HTTP callback request passed from host -> plugin.
+// The host should forward these fields "as-is" (no signature parsing in host).
+message RawHttpRequest {
+  string method = 1;
+  string path = 2;
+  string raw_query = 3;
+  map<string, StringList> headers = 4;
+  bytes body = 5;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_OK = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_ERROR = 3;
+}
+
+message HealthCheckRequest {
+  string instance_id = 1;
+}
+
+message HealthCheckResponse {
+  HealthStatus status = 1;
+  string message = 2;
+  int64 unix_millis = 3;
+}
+
+message ConfigSchema {
+  string json_schema = 1;
+  string ui_schema = 2;
+}

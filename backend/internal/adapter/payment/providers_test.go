@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -48,7 +49,18 @@ func TestYipayProvider_SignAndVerify(t *testing.T) {
 		"sign_type":    "MD5",
 	}
 	params["sign"] = p.sign(params)
-	notify, err := p.VerifyNotify(context.Background(), params)
+	form := url.Values{}
+	for k, v := range params {
+		form.Set(k, v)
+	}
+	raw := usecase.RawHTTPRequest{
+		Method:   "POST",
+		Path:     "/payments/notify/yipay",
+		Headers:  map[string][]string{"Content-Type": {"application/x-www-form-urlencoded"}},
+		Body:     []byte(form.Encode()),
+		RawQuery: "",
+	}
+	notify, err := p.VerifyNotify(context.Background(), raw)
 	if err != nil || !notify.Paid {
 		t.Fatalf("verify notify: %v, %+v", err, notify)
 	}
@@ -59,7 +71,7 @@ func TestSimpleProvider_Errors(t *testing.T) {
 	if _, err := p.CreatePayment(context.Background(), usecase.PaymentCreateRequest{}); err == nil {
 		t.Fatalf("expected create error")
 	}
-	if _, err := p.VerifyNotify(context.Background(), map[string]string{}); err == nil {
+	if _, err := p.VerifyNotify(context.Background(), usecase.RawHTTPRequest{}); err == nil {
 		t.Fatalf("expected verify error")
 	}
 }

@@ -106,7 +106,8 @@ func (p *yipayProvider) CreatePayment(ctx context.Context, req usecase.PaymentCr
 	}, nil
 }
 
-func (p *yipayProvider) VerifyNotify(ctx context.Context, params map[string]string) (usecase.PaymentNotifyResult, error) {
+func (p *yipayProvider) VerifyNotify(ctx context.Context, req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error) {
+	params := rawToParams(req)
 	sign := params["sign"]
 	if sign == "" {
 		return usecase.PaymentNotifyResult{}, errors.New("missing sign")

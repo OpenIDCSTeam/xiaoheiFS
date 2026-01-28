@@ -2,6 +2,7 @@ package payment
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestYipayProvider(t *testing.T) {
 	if !strings.Contains(res.PayURL, "sign=") {
 		t.Fatalf("expected sign in pay url")
 	}
-	if _, err := provider.VerifyNotify(context.Background(), map[string]string{}); err == nil {
+	if _, err := provider.VerifyNotify(context.Background(), usecase.RawHTTPRequest{}); err == nil {
 		t.Fatalf("expected missing sign error")
 	}
 	params := map[string]string{
@@ -39,11 +40,22 @@ func TestYipayProvider(t *testing.T) {
 		"trade_status": "TRADE_SUCCESS",
 	}
 	params["sign"] = provider.sign(params)
-	result, err := provider.VerifyNotify(context.Background(), params)
+	form := url.Values{}
+	for k, v := range params {
+		form.Set(k, v)
+	}
+	raw := usecase.RawHTTPRequest{
+		Method:   "POST",
+		Path:     "/payments/notify/yipay",
+		Headers:  map[string][]string{"Content-Type": {"application/x-www-form-urlencoded"}},
+		Body:     []byte(form.Encode()),
+		RawQuery: "",
+	}
+	result, err := provider.VerifyNotify(context.Background(), raw)
 	if err != nil || !result.Paid {
 		t.Fatalf("verify notify: %v %v", result, err)
 	}
-	result2, err := provider.VerifyNotify(context.Background(), params)
+	result2, err := provider.VerifyNotify(context.Background(), raw)
 	if err != nil || result2.TradeNo != result.TradeNo {
 		t.Fatalf("verify notify again: %v %v", result2, err)
 	}

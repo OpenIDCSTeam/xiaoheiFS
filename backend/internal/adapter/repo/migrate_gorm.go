@@ -48,6 +48,7 @@ func migrateGorm(db *gorm.DB) error {
 		&scheduledTaskRunRow{},
 		&notificationRow{},
 		&realnameVerificationRow{},
+		&pluginInstallationRow{},
 	)
 }
 
@@ -608,3 +609,17 @@ type realnameVerificationRow struct {
 }
 
 func (realnameVerificationRow) TableName() string { return "realname_verifications" }
+
+type pluginInstallationRow struct {
+	ID              int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	Category        string    `gorm:"column:category;not null;uniqueIndex:idx_plugin_installations_cat_id"`
+	PluginID        string    `gorm:"column:plugin_id;not null;uniqueIndex:idx_plugin_installations_cat_id"`
+	InstanceID      string    `gorm:"column:instance_id;not null"`
+	Enabled         int       `gorm:"column:enabled;not null;default:0"`
+	SignatureStatus string    `gorm:"column:signature_status;not null;default:unsigned"`
+	ConfigCipher    string    `gorm:"column:config_cipher;not null"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at"`
+}
+
+func (pluginInstallationRow) TableName() string { return "plugin_installations" }

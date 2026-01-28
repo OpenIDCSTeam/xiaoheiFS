@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+service KycService {
+  rpc Start(KycStartRequest) returns (KycStartResponse);
+  rpc QueryResult(KycQueryRequest) returns (KycQueryResponse);
+}
+
+message KycStartRequest {
+  string user_id = 1;
+  map<string, string> params = 2;
+}
+
+message KycStartResponse {
+  bool ok = 1;
+  string token = 2;
+  string url = 3;
+  string next_step = 4;
+  string error = 5;
+}
+
+message KycQueryRequest {
+  string token = 1;
+}
+
+message KycQueryResponse {
+  bool ok = 1;
+  string status = 2;
+  string reason = 3;
+  string raw_json = 4;
+  string error = 5;
+}

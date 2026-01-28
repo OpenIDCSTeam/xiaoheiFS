@@ -1,0 +1,12 @@
+{
+  "title": "Tencent SMS Config",
+  "type": "object",
+  "properties": {
+    "secret_id": { "type": "string", "title": "SecretId" },
+    "secret_key": { "type": "string", "title": "SecretKey", "format": "password" },
+    "sdk_app_id": { "type": "string", "title": "SdkAppId" },
+    "sign_name": { "type": "string", "title": "SignName" }
+  },
+  "required": ["secret_id", "secret_key", "sdk_app_id", "sign_name"]
+}
+

@@ -1,0 +1,11 @@
+{
+  "title": "Aliyun SMS Config",
+  "type": "object",
+  "properties": {
+    "access_key_id": { "type": "string", "title": "AccessKey ID" },
+    "access_key_secret": { "type": "string", "title": "AccessKey Secret", "format": "password" },
+    "sign_name": { "type": "string", "title": "Sign Name" }
+  },
+  "required": ["access_key_id", "access_key_secret", "sign_name"]
+}
+

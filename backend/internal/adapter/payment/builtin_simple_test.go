@@ -15,7 +15,7 @@ func TestSimpleProviders(t *testing.T) {
 		if _, err := provider.CreatePayment(context.Background(), usecase.PaymentCreateRequest{}); err == nil {
 			t.Fatalf("expected create payment error")
 		}
-		if _, err := provider.VerifyNotify(context.Background(), map[string]string{}); err == nil {
+		if _, err := provider.VerifyNotify(context.Background(), usecase.RawHTTPRequest{}); err == nil {
 			t.Fatalf("expected verify notify error")
 		}
 	}

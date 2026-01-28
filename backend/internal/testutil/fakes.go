@@ -263,7 +263,7 @@ type FakePaymentProvider struct {
 	CreateErr  error
 	VerifyRes  usecase.PaymentNotifyResult
 	VerifyErr  error
-	VerifyFunc func(params map[string]string) (usecase.PaymentNotifyResult, error)
+	VerifyFunc func(req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error)
 }
 
 func (f *FakePaymentProvider) Key() string        { return f.KeyVal }
@@ -278,9 +278,9 @@ func (f *FakePaymentProvider) CreatePayment(ctx context.Context, req usecase.Pay
 	}
 	return f.CreateRes, nil
 }
-func (f *FakePaymentProvider) VerifyNotify(ctx context.Context, params map[string]string) (usecase.PaymentNotifyResult, error) {
+func (f *FakePaymentProvider) VerifyNotify(ctx context.Context, req usecase.RawHTTPRequest) (usecase.PaymentNotifyResult, error) {
 	if f.VerifyFunc != nil {
-		return f.VerifyFunc(params)
+		return f.VerifyFunc(req)
 	}
 	if f.VerifyErr != nil {
 		return usecase.PaymentNotifyResult{}, f.VerifyErr

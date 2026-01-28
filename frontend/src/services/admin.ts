@@ -38,7 +38,9 @@ import type {
   WalletOrderListResponse,
   WalletOrder,
   DebugStatusResponse,
-  DebugLogsResponse
+  DebugLogsResponse,
+  PluginListItem,
+  PluginDiscoverItem
 } from "./types";
 
 export const adminLogin = (payload: Record<string, unknown>) => http.post("/admin/api/v1/auth/login", payload);
@@ -278,3 +280,39 @@ export const uploadPaymentPlugin = (file: File, password: string) => {
     headers: { "Content-Type": "multipart/form-data" }
   });
 };
+
+// Plugins (new unified plugin system)
+export const listAdminPlugins = () => http.get<{ items?: PluginListItem[] }>("/admin/api/v1/plugins");
+export const discoverAdminPlugins = () => http.get<{ items?: PluginDiscoverItem[] }>("/admin/api/v1/plugins/discover");
+
+export const installAdminPlugin = (file: File, adminPassword?: string) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (adminPassword) formData.append("admin_password", adminPassword);
+  return http.post<{ ok?: boolean; plugin?: Record<string, unknown> }>("/admin/api/v1/plugins/install", formData, {
+    headers: { "Content-Type": "multipart/form-data" }
+  });
+};
+
+export const enableAdminPlugin = (category: string, pluginId: string) =>
+  http.post<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/enable`);
+
+export const disableAdminPlugin = (category: string, pluginId: string) =>
+  http.post<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/disable`);
+
+export const uninstallAdminPlugin = (category: string, pluginId: string) =>
+  http.delete<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}`);
+
+export const importAdminPluginFromDisk = (category: string, pluginId: string, adminPassword?: string) =>
+  http.post<{ ok?: boolean; plugin?: Record<string, unknown> }>(`/admin/api/v1/plugins/${category}/${pluginId}/import`, {
+    admin_password: adminPassword || ""
+  });
+
+export const getAdminPluginConfigSchema = (category: string, pluginId: string) =>
+  http.get<{ json_schema?: string; ui_schema?: string }>(`/admin/api/v1/plugins/${category}/${pluginId}/config/schema`);
+
+export const getAdminPluginConfig = (category: string, pluginId: string) =>
+  http.get<{ config_json?: string }>(`/admin/api/v1/plugins/${category}/${pluginId}/config`);
+
+export const updateAdminPluginConfig = (category: string, pluginId: string, configJson: string) =>
+  http.put<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/config`, { config_json: configJson });

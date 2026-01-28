@@ -3,12 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestLoadConfigDefaults(t *testing.T) {
-	_ = os.Unsetenv("APP_ADDR")
-	_ = os.Unsetenv("APP_DB_PATH")
 	cfg := Load()
 	if cfg.Addr == "" || cfg.DBPath == "" {
 		t.Fatalf("expected defaults")
@@ -21,14 +20,7 @@ func TestLoadFromYAMLFile(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 	_ = os.Chdir(td)
 
-	// Ensure env doesn't mask file values.
-	_ = os.Unsetenv("APP_ADDR")
-	_ = os.Unsetenv("APP_DB_TYPE")
-	_ = os.Unsetenv("APP_DB_PATH")
-	_ = os.Unsetenv("APP_DB_DSN")
-	_ = os.Unsetenv("SITE_URL")
-
-	b := []byte("addr: \":9999\"\ndb:\n  type: sqlite\n  path: ./data/test.db\nsite:\n  url: https://example.com\n")
+	b := []byte("addr: \":9999\"\ndb:\n  type: sqlite\n  path: ./data/test.db\njwt_secret: \"fixed\"\n")
 	if err := os.WriteFile(filepath.Join(td, localConfigYAML), b, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -40,16 +32,31 @@ func TestLoadFromYAMLFile(t *testing.T) {
 	if cfg.DBPath != "./data/test.db" {
 		t.Fatalf("expected db path from yaml, got %q", cfg.DBPath)
 	}
-	if cfg.SiteURL != "https://example.com" {
-		t.Fatalf("expected site url from yaml, got %q", cfg.SiteURL)
+	if cfg.JWTSecret != "fixed" {
+		t.Fatalf("expected jwt secret from yaml, got %q", cfg.JWTSecret)
 	}
 }
 
-func TestGetEnvOverride(t *testing.T) {
-	const key = "APP_ADDR"
-	_ = os.Setenv(key, "127.0.0.1:9000")
-	defer os.Unsetenv(key)
-	if v := getEnv(key, ":8080"); v != "127.0.0.1:9000" {
-		t.Fatalf("expected env override")
+func TestLoadGeneratesJWTSecretAndPersists(t *testing.T) {
+	td := t.TempDir()
+	oldWD, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+	_ = os.Chdir(td)
+
+	cfg1 := Load()
+	if strings.TrimSpace(cfg1.JWTSecret) == "" {
+		t.Fatalf("expected jwt secret to be generated")
+	}
+	b, err := os.ReadFile(filepath.Join(td, localConfigYAML))
+	if err != nil {
+		t.Fatalf("expected config file written: %v", err)
+	}
+	if !strings.Contains(string(b), "jwt_secret") {
+		t.Fatalf("expected jwt_secret persisted")
+	}
+
+	cfg2 := Load()
+	if cfg2.JWTSecret != cfg1.JWTSecret {
+		t.Fatalf("expected jwt secret to be stable across loads")
 	}
 }

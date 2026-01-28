@@ -157,7 +157,7 @@ func (s *PaymentService) SelectPayment(ctx context.Context, userID int64, orderI
 	}
 }
 
-func (s *PaymentService) HandleNotify(ctx context.Context, providerKey string, params map[string]string) (PaymentNotifyResult, error) {
+func (s *PaymentService) HandleNotify(ctx context.Context, providerKey string, req RawHTTPRequest) (PaymentNotifyResult, error) {
 	if s.registry == nil || s.payments == nil {
 		return PaymentNotifyResult{}, ErrInvalidInput
 	}
@@ -165,7 +165,7 @@ func (s *PaymentService) HandleNotify(ctx context.Context, providerKey string, p
 	if err != nil {
 		return PaymentNotifyResult{}, err
 	}
-	result, err := provider.VerifyNotify(ctx, params)
+	result, err := provider.VerifyNotify(ctx, req)
 	if err != nil {
 		return result, err
 	}
@@ -266,6 +266,7 @@ func (s *PaymentService) payWithProvider(ctx context.Context, order domain.Order
 	}
 	result, err := provider.CreatePayment(ctx, PaymentCreateRequest{
 		OrderID:   order.ID,
+		OrderNo:   order.OrderNo,
 		UserID:    order.UserID,
 		Amount:    order.TotalAmount,
 		Currency:  order.Currency,

@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+message SmsCapability {
+  bool send = 1;
+}
+
+message PaymentCapability {
+  repeated string methods = 1;
+}
+
+message KycCapability {
+  bool start = 1;
+  bool query_result = 2;
+}
+
+message Manifest {
+  string plugin_id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+
+  optional SmsCapability sms = 10;
+  optional PaymentCapability payment = 11;
+  optional KycCapability kyc = 12;
+}
