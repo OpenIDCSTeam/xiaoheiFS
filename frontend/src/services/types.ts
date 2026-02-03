@@ -5,6 +5,11 @@ export interface ApiList<T> {
 
 export type PluginSignatureStatus = "official" | "untrusted" | "unsigned";
 
+export interface PluginPaymentMethodItem {
+  method: string;
+  enabled: boolean;
+}
+
 export interface PluginManifest {
   plugin_id?: string;
   name?: string;
@@ -14,12 +19,14 @@ export interface PluginManifest {
     sms?: { send?: boolean } | null;
     payment?: { methods?: string[] } | null;
     kyc?: { start?: boolean; query_result?: boolean } | null;
+    automation?: { features?: string[]; not_supported_reasons?: Record<string, string> } | null;
   };
 }
 
 export interface PluginListItem {
   category?: string;
   plugin_id?: string;
+  instance_id?: string;
   name?: string;
   version?: string;
   signature_status?: PluginSignatureStatus;
@@ -41,6 +48,7 @@ export interface PluginListItem {
 export interface PluginDiscoverItem {
   category?: string;
   plugin_id?: string;
+  instance_id?: string;
   name?: string;
   version?: string;
   signature_status?: PluginSignatureStatus;
@@ -61,14 +69,31 @@ export interface RegisterRequest {
   username: string;
   email: string;
   qq?: string;
+  phone?: string;
   password: string;
   captcha_id: string;
   captcha_code: string;
+  verify_code?: string;
 }
 
 export interface LoginRequest {
   username: string;
   password: string;
+  captcha_id?: string;
+  captcha_code?: string;
+}
+
+export interface AuthSettings {
+  register_enabled?: boolean;
+  register_required_fields?: string[];
+  password_min_len?: number;
+  password_require_upper?: boolean;
+  password_require_lower?: boolean;
+  password_require_number?: boolean;
+  password_require_symbol?: boolean;
+  register_verify_type?: "none" | "email" | "sms";
+  register_captcha_enabled?: boolean;
+  login_captcha_enabled?: boolean;
 }
 
 export interface AuthResponse {
@@ -82,16 +107,21 @@ export interface User {
   username?: string;
   email?: string;
   qq?: string;
+  phone?: string;
   avatar?: string;
   avatar_url?: string;
+  bio?: string;
+  intro?: string;
   role?: string;
   status?: string;
   created_at?: string;
+  updated_at?: string;
   balance?: number;
 }
 
 export interface Region {
   id?: number;
+  goods_type_id?: number;
   code?: string;
   name?: string;
   active?: boolean;
@@ -99,6 +129,7 @@ export interface Region {
 
 export interface Line {
   id?: number;
+  goods_type_id?: number;
   region_id?: number;
   name?: string;
   line_id?: number;
@@ -126,6 +157,7 @@ export interface Line {
 
 export interface Product {
   id?: number;
+  goods_type_id?: number;
   plan_group_id?: number;
   product_id?: number;
   name?: string;
@@ -367,6 +399,7 @@ export interface VPSInstance {
   id?: number;
   user_id?: number;
   order_item_id?: number;
+  goods_type_id?: number;
   automation_instance_id?: string;
   name?: string;
   region?: string;
@@ -434,6 +467,19 @@ export interface AutomationSyncLog {
   status?: string;
   message?: string;
   created_at?: string;
+}
+
+export interface GoodsType {
+  id?: number;
+  code?: string;
+  name?: string;
+  active?: boolean;
+  sort_order?: number;
+  automation_category?: string;
+  automation_plugin_id?: string;
+  automation_instance_id?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface DashboardOverview {

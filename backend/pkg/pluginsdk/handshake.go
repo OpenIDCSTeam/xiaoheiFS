@@ -9,10 +9,11 @@ const (
 )
 
 const (
-	PluginKeyCore    = "core"
-	PluginKeySMS     = "sms"
-	PluginKeyPayment = "payment"
-	PluginKeyKYC     = "kyc"
+	PluginKeyCore       = "core"
+	PluginKeySMS        = "sms"
+	PluginKeyPayment    = "payment"
+	PluginKeyKYC        = "kyc"
+	PluginKeyAutomation = "automation"
 )
 
 var Handshake = plugin.HandshakeConfig{

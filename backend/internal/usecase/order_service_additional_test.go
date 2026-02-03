@@ -48,7 +48,8 @@ func TestOrderService_RefreshOrderUpdates(t *testing.T) {
 			123: {HostID: 123, HostName: "vm-refresh", State: 2, RemoteIP: "1.1.1.1"},
 		},
 	}
-	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, fakeAuto, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, autoResolver, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
 	updated, err := svc.RefreshOrder(context.Background(), user.ID, order.ID)
 	if err != nil || len(updated) != 1 {
 		t.Fatalf("refresh order: %v %d", err, len(updated))

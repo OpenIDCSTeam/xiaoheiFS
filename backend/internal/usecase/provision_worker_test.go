@@ -54,7 +54,8 @@ func TestProvisionWorker_MarksFailedOnCreateFailedState(t *testing.T) {
 			2001: {HostID: 2001, HostName: "vm-fail", State: 11},
 		},
 	}
-	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, fakeAuto, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, autoResolver, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
 
 	if err := svc.ProcessProvisionJobs(context.Background(), 10); err != nil {
 		t.Fatalf("process jobs: %v", err)
@@ -86,7 +87,8 @@ func TestProvisionWorker_DoneWhenOrderMissing(t *testing.T) {
 	if err := repo.CreateOrUpdateProvisionJob(context.Background(), &job); err != nil {
 		t.Fatalf("create job: %v", err)
 	}
-	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, &testutil.FakeAutomationClient{}, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: &testutil.FakeAutomationClient{}}
+	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, autoResolver, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
 
 	if err := svc.ProcessProvisionJobs(context.Background(), 10); err != nil {
 		t.Fatalf("process jobs: %v", err)

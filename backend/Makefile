@@ -15,7 +15,8 @@ proto:
 		plugin/v1/core.proto \
 		plugin/v1/sms.proto \
 		plugin/v1/kyc.proto \
-		plugin/v1/payment.proto
+		plugin/v1/payment.proto \
+		plugin/v1/automation.proto
 
 demo-plugins:
 	go build -o plugins/payment/ezpay/plugin.exe ./plugin-demo/pluginv1/payment_ezpay

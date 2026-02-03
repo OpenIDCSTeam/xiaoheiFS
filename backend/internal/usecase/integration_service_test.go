@@ -108,7 +108,7 @@ func (f fakeAutomationSync) GetVNCURL(ctx context.Context, hostID int64) (string
 
 func TestIntegrationService_Config(t *testing.T) {
 	_, repo := testutil.NewTestDB(t, false)
-	svc := usecase.NewIntegrationService(repo, repo, repo, nil, repo)
+	svc := usecase.NewIntegrationService(repo, repo, repo, repo, nil, repo)
 
 	if err := svc.UpdateAutomationConfig(context.Background(), 0, usecase.AutomationConfig{
 		BaseURL: "http://a",
@@ -138,7 +138,7 @@ func TestIntegrationService_SyncAutomation(t *testing.T) {
 			10: {{ImageID: 200, Name: "Ubuntu", Type: "linux"}},
 		},
 	}
-	svc := usecase.NewIntegrationService(repo, repo, repo, auto, repo)
+	svc := usecase.NewIntegrationService(repo, repo, repo, repo, &testutil.FakeAutomationResolver{Client: auto}, repo)
 	if _, err := svc.SyncAutomation(context.Background(), "merge"); err != nil {
 		t.Fatalf("sync: %v", err)
 	}

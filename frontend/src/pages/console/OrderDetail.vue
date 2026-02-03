@@ -326,6 +326,33 @@
         </template>
       </a-form>
     </a-modal>
+
+    <!-- WeChat QR Code Modal (wechat_native) -->
+    <a-modal v-model:open="wechatQrOpen" title="微信扫码支付" :footer="null" :width="420">
+      <div style="display:flex; flex-direction:column; align-items:center; gap: 12px;">
+        <a-spin :spinning="wechatQrLoading">
+          <img v-if="wechatQrDataUrl" :src="wechatQrDataUrl" alt="wechat-qrcode" style="width: 260px; height: 260px;" />
+        </a-spin>
+        <div style="color: rgba(0,0,0,0.65); font-size: 12px; text-align:center;">
+          请使用微信扫描二维码完成支付；支付完成后返回此页点击“刷新订单”。
+        </div>
+        <a-typography-text v-if="wechatQrUrl" copyable>{{ wechatQrUrl }}</a-typography-text>
+      </div>
+    </a-modal>
+
+    <!-- WeChat JSAPI Modal (wechat_jsapi) -->
+    <a-modal v-model:open="wechatJsapiOpen" title="微信支付（JSAPI）" :footer="null" :width="560">
+      <a-alert
+        type="info"
+        show-icon
+        message="JSAPI 仅在微信内置浏览器可直接调起；如果你在普通浏览器中，请复制参数并在微信内打开页面发起支付。"
+        style="margin-bottom: 12px"
+      />
+      <a-button type="primary" :disabled="!wechatJsapiParams" @click="invokeWeChatJsapi" style="margin-bottom: 12px;">
+        在微信内调起支付
+      </a-button>
+      <a-textarea :value="wechatJsapiParamsJson" :rows="10" readonly />
+    </a-modal>
   </div>
 </template>
 
@@ -339,6 +366,7 @@ import { submitOrderPayment, listPaymentProviders, createOrderPayment, cancelOrd
 import { message, Modal } from "ant-design-vue";
 import OrderStatusBadge from "@/components/OrderStatusBadge.vue";
 import { createSseConnection } from "@/services/sse";
+import QRCode from "qrcode";
 
 // Icons
 import {
@@ -506,6 +534,22 @@ const paymentHint = ref("");
 const paymentFormRef = ref();
 const paymentModalVisible = ref(false);
 
+// WeChat payment UX helpers (for plugin methods wechatpay_v3.wechat_native / wechat_jsapi)
+const wechatQrOpen = ref(false);
+const wechatQrLoading = ref(false);
+const wechatQrUrl = ref("");
+const wechatQrDataUrl = ref("");
+
+const wechatJsapiOpen = ref(false);
+const wechatJsapiParams = ref(null);
+const wechatJsapiParamsJson = computed(() => {
+  try {
+    return wechatJsapiParams.value ? JSON.stringify(wechatJsapiParams.value, null, 2) : "";
+  } catch {
+    return "";
+  }
+});
+
 watch(
   () => order.value?.total_amount,
   (val) => {
@@ -520,6 +564,54 @@ const showPaymentModal = () => {
 const closePaymentModal = () => {
   paymentModalVisible.value = false;
   paymentHint.value = "";
+};
+
+const openWeChatQr = async (codeUrl) => {
+  const url = String(codeUrl || "");
+  if (!url) return;
+  wechatQrOpen.value = true;
+  wechatQrUrl.value = url;
+  wechatQrLoading.value = true;
+  try {
+    wechatQrDataUrl.value = await QRCode.toDataURL(url, { width: 260, margin: 1 });
+  } catch {
+    wechatQrDataUrl.value = "";
+  } finally {
+    wechatQrLoading.value = false;
+  }
+};
+
+const openWeChatJsapi = (paramsJson) => {
+  try {
+    const parsed = JSON.parse(String(paramsJson || ""));
+    wechatJsapiParams.value = parsed;
+  } catch {
+    wechatJsapiParams.value = null;
+  }
+  wechatJsapiOpen.value = true;
+};
+
+const invokeWeChatJsapi = async () => {
+  const params = wechatJsapiParams.value;
+  if (!params) return;
+  const bridge = window.WeixinJSBridge;
+  if (!bridge || typeof bridge.invoke !== "function") {
+    message.warning("当前环境不支持 JSAPI，请在微信内打开此页面");
+    return;
+  }
+  try {
+    await new Promise((resolve, reject) => {
+      bridge.invoke("getBrandWCPayRequest", params, (res) => {
+        const msg = String(res?.err_msg || res?.errMsg || "");
+        if (msg === "get_brand_wcpay_request:ok") return resolve(true);
+        reject(new Error(msg || "pay failed"));
+      });
+    });
+    message.success("已发起支付，请在微信中完成付款");
+    wechatJsapiOpen.value = false;
+  } catch (e) {
+    message.error(e?.message || "微信支付发起失败");
+  }
 };
 
 const normalizeSchemaFields = (schemaJson) => {
@@ -654,6 +746,41 @@ const submitPayment = async () => {
     const result = res.data || {};
     if (result.extra?.instructions) {
       paymentHint.value = result.extra.instructions;
+    }
+
+    const payKind = String(result.extra?.pay_kind || "");
+    if (payKind === "qr") {
+      const url = String(result.extra?.code_url || result.pay_url || "");
+      if (url) {
+        await openWeChatQr(url);
+        message.info("请扫码完成支付");
+        closePaymentModal();
+        return;
+      }
+    }
+    if (payKind === "jsapi") {
+      const paramsJson = String(result.extra?.jsapi_params_json || "");
+      if (paramsJson) {
+        openWeChatJsapi(paramsJson);
+        closePaymentModal();
+        return;
+      }
+    }
+    if (payKind === "form") {
+      const formHtml = String(result.extra?.form_html || "");
+      if (formHtml) {
+        const w = window.open("", "_blank");
+        if (!w) {
+          message.warning("浏览器拦截了弹窗，请允许弹窗后重试");
+          return;
+        }
+        w.document.open();
+        w.document.write(formHtml);
+        w.document.close();
+        message.info("已打开支付页面，请完成支付");
+        closePaymentModal();
+        return;
+      }
     }
     if (result.paid) {
       message.success("支付完成");

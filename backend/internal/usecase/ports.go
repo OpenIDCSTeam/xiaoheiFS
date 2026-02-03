@@ -25,6 +25,12 @@ type CaptchaRepository interface {
 	DeleteCaptcha(ctx context.Context, id string) error
 }
 
+type VerificationCodeRepository interface {
+	CreateVerificationCode(ctx context.Context, code domain.VerificationCode) error
+	GetLatestVerificationCode(ctx context.Context, channel, receiver, purpose string) (domain.VerificationCode, error)
+	DeleteVerificationCodes(ctx context.Context, channel, receiver, purpose string) error
+}
+
 type CatalogRepository interface {
 	ListRegions(ctx context.Context) ([]domain.Region, error)
 	ListPlanGroups(ctx context.Context) ([]domain.PlanGroup, error)
@@ -41,6 +47,14 @@ type CatalogRepository interface {
 	CreatePackage(ctx context.Context, pkg *domain.Package) error
 	UpdatePackage(ctx context.Context, pkg domain.Package) error
 	DeletePackage(ctx context.Context, id int64) error
+}
+
+type GoodsTypeRepository interface {
+	ListGoodsTypes(ctx context.Context) ([]domain.GoodsType, error)
+	GetGoodsType(ctx context.Context, id int64) (domain.GoodsType, error)
+	CreateGoodsType(ctx context.Context, gt *domain.GoodsType) error
+	UpdateGoodsType(ctx context.Context, gt domain.GoodsType) error
+	DeleteGoodsType(ctx context.Context, id int64) error
 }
 
 type SystemImageRepository interface {
@@ -87,6 +101,7 @@ type PaymentRepository interface {
 	ListPaymentsByOrder(ctx context.Context, orderID int64) ([]domain.OrderPayment, error)
 	GetPaymentByTradeNo(ctx context.Context, tradeNo string) (domain.OrderPayment, error)
 	GetPaymentByIdempotencyKey(ctx context.Context, orderID int64, key string) (domain.OrderPayment, error)
+	UpdatePaymentTradeNo(ctx context.Context, id int64, tradeNo string) error
 	UpdatePaymentStatus(ctx context.Context, id int64, status domain.PaymentStatus, reviewedBy *int64, reason string) error
 	ListPayments(ctx context.Context, filter PaymentFilter, limit, offset int) ([]domain.OrderPayment, int, error)
 }
@@ -138,9 +153,15 @@ type SettingsRepository interface {
 
 type PluginInstallationRepository interface {
 	UpsertPluginInstallation(ctx context.Context, inst *domain.PluginInstallation) error
-	GetPluginInstallation(ctx context.Context, category, pluginID string) (domain.PluginInstallation, error)
+	GetPluginInstallation(ctx context.Context, category, pluginID, instanceID string) (domain.PluginInstallation, error)
 	ListPluginInstallations(ctx context.Context) ([]domain.PluginInstallation, error)
-	DeletePluginInstallation(ctx context.Context, category, pluginID string) error
+	DeletePluginInstallation(ctx context.Context, category, pluginID, instanceID string) error
+}
+
+type PluginPaymentMethodRepository interface {
+	ListPluginPaymentMethods(ctx context.Context, category, pluginID, instanceID string) ([]domain.PluginPaymentMethod, error)
+	UpsertPluginPaymentMethod(ctx context.Context, m *domain.PluginPaymentMethod) error
+	DeletePluginPaymentMethod(ctx context.Context, category, pluginID, instanceID, method string) error
 }
 
 type AuditRepository interface {
@@ -341,6 +362,7 @@ type PaymentCreateRequest struct {
 	Subject   string
 	ReturnURL string
 	NotifyURL string
+	Extra     map[string]string
 }
 
 type PaymentCreateResult struct {
@@ -350,6 +372,7 @@ type PaymentCreateResult struct {
 }
 
 type PaymentNotifyResult struct {
+	OrderNo string
 	TradeNo string
 	Paid    bool
 	Amount  int64
@@ -425,6 +448,10 @@ type AutomationClient interface {
 	ListProducts(ctx context.Context, lineID int64) ([]AutomationProduct, error)
 	GetMonitor(ctx context.Context, hostID int64) (AutomationMonitor, error)
 	GetVNCURL(ctx context.Context, hostID int64) (string, error)
+}
+
+type AutomationClientResolver interface {
+	ClientForGoodsType(ctx context.Context, goodsTypeID int64) (AutomationClient, error)
 }
 
 type EmailSender interface {

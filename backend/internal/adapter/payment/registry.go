@@ -42,6 +42,7 @@ type Registry struct {
 	mu          sync.Mutex
 	plugins     pluginState
 	grpcPlugins *plugins.Manager
+	methodRepo  usecase.PluginPaymentMethodRepository
 }
 
 type pluginState struct {
@@ -61,6 +62,10 @@ func NewRegistry(settings usecase.SettingsRepository) *Registry {
 
 func (r *Registry) SetPluginManager(mgr *plugins.Manager) {
 	r.grpcPlugins = mgr
+}
+
+func (r *Registry) SetPluginPaymentMethodRepo(repo usecase.PluginPaymentMethodRepository) {
+	r.methodRepo = repo
 }
 
 func (r *Registry) SetPluginDir(dir string) {
@@ -189,11 +194,52 @@ func (r *Registry) GetProvider(ctx context.Context, key string) (usecase.Payment
 		return provider, nil
 	}
 	if r.grpcPlugins != nil {
+		if disabled, known := r.grpcPaymentMethodDisabled(ctx, key); known && disabled {
+			return nil, usecase.ErrForbidden
+		}
 		if p := r.grpcProviderByKey(ctx, key); p != nil {
 			return p, nil
 		}
 	}
 	return nil, usecase.ErrNotFound
+}
+
+func (r *Registry) grpcPaymentMethodDisabled(ctx context.Context, key string) (disabled bool, known bool) {
+	parts := strings.SplitN(strings.TrimSpace(key), ".", 2)
+	if len(parts) != 2 {
+		return false, false
+	}
+	pluginID := strings.TrimSpace(parts[0])
+	method := strings.TrimSpace(parts[1])
+	if pluginID == "" || method == "" {
+		return false, false
+	}
+	items, err := r.grpcPlugins.List(ctx)
+	if err != nil {
+		return false, false
+	}
+	for _, it := range items {
+		if !it.Enabled || it.InstanceID != plugins.DefaultInstanceID || it.PluginID != pluginID || it.Capabilities.Capabilities.Payment == nil {
+			continue
+		}
+		found := false
+		for _, m := range it.Capabilities.Capabilities.Payment.Methods {
+			if m == method {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		known = true
+		enabledMap := r.pluginPaymentMethodEnabledMap(ctx, it.Category, it.PluginID, it.InstanceID)
+		if ok, exists := enabledMap[method]; exists {
+			return !ok, true
+		}
+		return false, true
+	}
+	return false, false
 }
 
 func (r *Registry) GetProviderConfig(ctx context.Context, key string) (string, bool, error) {

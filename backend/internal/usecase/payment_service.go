@@ -28,6 +28,7 @@ type PaymentSelectInput struct {
 	Method    string
 	ReturnURL string
 	NotifyURL string
+	Extra     map[string]string
 }
 
 type PaymentSelectResult struct {
@@ -174,7 +175,47 @@ func (s *PaymentService) HandleNotify(ctx context.Context, providerKey string, r
 	}
 	payment, err := s.payments.GetPaymentByTradeNo(ctx, result.TradeNo)
 	if err != nil {
-		return result, err
+		// Some providers only know the host order no at create time (out_trade_no),
+		// and only provide a platform transaction id at notify time. To keep
+		// callbacks idempotent and compatible, fall back to order_no lookup and
+		// "claim" the payment record by updating its trade_no.
+		if s.orders == nil || result.OrderNo == "" {
+			return result, err
+		}
+		order, oerr := s.orders.GetOrderByNo(ctx, result.OrderNo)
+		if oerr != nil {
+			return result, err
+		}
+		items, perr := s.payments.ListPaymentsByOrder(ctx, order.ID)
+		if perr != nil {
+			return result, err
+		}
+		var picked *domain.OrderPayment
+		for i := range items {
+			if items[i].Method == providerKey {
+				picked = &items[i]
+				break
+			}
+		}
+		if picked == nil {
+			return result, err
+		}
+		if result.TradeNo != "" && picked.TradeNo != result.TradeNo {
+			if uerr := s.payments.UpdatePaymentTradeNo(ctx, picked.ID, result.TradeNo); uerr != nil {
+				// If the trade_no is already claimed (replayed notify), accept it if it belongs
+				// to the same order & provider key.
+				if existing, gerr := s.payments.GetPaymentByTradeNo(ctx, result.TradeNo); gerr == nil && existing.OrderID == picked.OrderID && existing.Method == picked.Method {
+					payment = existing
+				} else {
+					return result, uerr
+				}
+			} else {
+				picked.TradeNo = result.TradeNo
+			}
+		}
+		if payment.ID == 0 {
+			payment = *picked
+		}
 	}
 	if payment.Status != domain.PaymentStatusApproved {
 		if err := s.payments.UpdatePaymentStatus(ctx, payment.ID, domain.PaymentStatusApproved, nil, ""); err != nil {
@@ -273,6 +314,7 @@ func (s *PaymentService) payWithProvider(ctx context.Context, order domain.Order
 		Subject:   fmt.Sprintf("Order %s", order.OrderNo),
 		ReturnURL: input.ReturnURL,
 		NotifyURL: input.NotifyURL,
+		Extra:     input.Extra,
 	})
 	if err != nil {
 		return PaymentSelectResult{}, err

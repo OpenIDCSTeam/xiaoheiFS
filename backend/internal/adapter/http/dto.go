@@ -29,14 +29,16 @@ type UserDTO struct {
 }
 
 type RegionDTO struct {
-	ID     int64  `json:"id"`
-	Code   string `json:"code"`
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
+	ID          int64  `json:"id"`
+	GoodsTypeID int64  `json:"goods_type_id"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Active      bool   `json:"active"`
 }
 
 type PlanGroupDTO struct {
 	ID                int64   `json:"id"`
+	GoodsTypeID       int64   `json:"goods_type_id"`
 	RegionID          int64   `json:"region_id"`
 	Name              string  `json:"name"`
 	LineID            int64   `json:"line_id"`
@@ -64,6 +66,7 @@ type PlanGroupDTO struct {
 
 type PackageDTO struct {
 	ID                int64   `json:"id"`
+	GoodsTypeID       int64   `json:"goods_type_id"`
 	PlanGroupID       int64   `json:"plan_group_id"`
 	ProductID         int64   `json:"product_id"`
 	Name              string  `json:"name"`
@@ -270,6 +273,7 @@ type VPSInstanceDTO struct {
 	ID                   int64           `json:"id"`
 	UserID               int64           `json:"user_id"`
 	OrderItemID          int64           `json:"order_item_id"`
+	GoodsTypeID          int64           `json:"goods_type_id"`
 	AutomationInstanceID string          `json:"automation_instance_id"`
 	Name                 string          `json:"name"`
 	Region               string          `json:"region"`
@@ -394,16 +398,18 @@ func toUserDTOs(items []domain.User) []UserDTO {
 
 func toRegionDTO(region domain.Region) RegionDTO {
 	return RegionDTO{
-		ID:     region.ID,
-		Code:   region.Code,
-		Name:   region.Name,
-		Active: region.Active,
+		ID:          region.ID,
+		GoodsTypeID: region.GoodsTypeID,
+		Code:        region.Code,
+		Name:        region.Name,
+		Active:      region.Active,
 	}
 }
 
 func toPlanGroupDTO(plan domain.PlanGroup) PlanGroupDTO {
 	return PlanGroupDTO{
 		ID:                plan.ID,
+		GoodsTypeID:       plan.GoodsTypeID,
 		RegionID:          plan.RegionID,
 		Name:              plan.Name,
 		LineID:            plan.LineID,
@@ -433,6 +439,7 @@ func toPlanGroupDTO(plan domain.PlanGroup) PlanGroupDTO {
 func toPackageDTO(pkg domain.Package) PackageDTO {
 	return PackageDTO{
 		ID:                pkg.ID,
+		GoodsTypeID:       pkg.GoodsTypeID,
 		PlanGroupID:       pkg.PlanGroupID,
 		ProductID:         pkg.ProductID,
 		Name:              pkg.Name,
@@ -701,6 +708,7 @@ func toVPSInstanceDTO(inst domain.VPSInstance) VPSInstanceDTO {
 		ID:                   inst.ID,
 		UserID:               inst.UserID,
 		OrderItemID:          inst.OrderItemID,
+		GoodsTypeID:          inst.GoodsTypeID,
 		AutomationInstanceID: inst.AutomationInstanceID,
 		Name:                 inst.Name,
 		Region:               inst.Region,
@@ -1004,6 +1012,7 @@ func parseStringArray(payload string) []string {
 func planGroupDTOToDomain(dto PlanGroupDTO) domain.PlanGroup {
 	return domain.PlanGroup{
 		ID:                dto.ID,
+		GoodsTypeID:       dto.GoodsTypeID,
 		RegionID:          dto.RegionID,
 		Name:              dto.Name,
 		LineID:            dto.LineID,
@@ -1033,6 +1042,7 @@ func planGroupDTOToDomain(dto PlanGroupDTO) domain.PlanGroup {
 func packageDTOToDomain(dto PackageDTO) domain.Package {
 	return domain.Package{
 		ID:                dto.ID,
+		GoodsTypeID:       dto.GoodsTypeID,
 		PlanGroupID:       dto.PlanGroupID,
 		ProductID:         dto.ProductID,
 		Name:              dto.Name,
@@ -1062,10 +1072,11 @@ func systemImageDTOToDomain(dto SystemImageDTO) domain.SystemImage {
 
 func regionDTOToDomain(dto RegionDTO) domain.Region {
 	return domain.Region{
-		ID:     dto.ID,
-		Code:   dto.Code,
-		Name:   dto.Name,
-		Active: dto.Active,
+		ID:          dto.ID,
+		GoodsTypeID: dto.GoodsTypeID,
+		Code:        dto.Code,
+		Name:        dto.Name,
+		Active:      dto.Active,
 	}
 }
 

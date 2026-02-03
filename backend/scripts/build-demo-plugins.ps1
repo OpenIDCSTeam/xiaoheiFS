@@ -7,10 +7,13 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $root
 
 New-Item -ItemType Directory -Force "plugins/payment/ezpay" | Out-Null
+New-Item -ItemType Directory -Force "plugins/payment/wechatpay_v3" | Out-Null
+New-Item -ItemType Directory -Force "plugins/payment/alipay_open" | Out-Null
 New-Item -ItemType Directory -Force "plugins/sms/alisms" | Out-Null
 New-Item -ItemType Directory -Force "plugins/sms/tencent_sms" | Out-Null
 New-Item -ItemType Directory -Force "plugins/kyc/aliyun_kyc" | Out-Null
 New-Item -ItemType Directory -Force "plugins/kyc/tencent_kyc" | Out-Null
+New-Item -ItemType Directory -Force "plugins/automation/lightboat" | Out-Null
 
 $targets = @(
   @{ goos = "windows"; goarch = "amd64"; ext = ".exe" },
@@ -21,10 +24,13 @@ $targets = @(
 
 $plugins = @(
   @{ id = "payment/ezpay"; pkg = "./plugin-demo/pluginv1/payment_ezpay" },
+  @{ id = "payment/wechatpay_v3"; pkg = "./plugin-demo/pluginv1/payment_wechatpay_v3" },
+  @{ id = "payment/alipay_open"; pkg = "./plugin-demo/pluginv1/payment_alipay_open" },
   @{ id = "sms/alisms"; pkg = "./plugin-demo/pluginv1/sms_alisms_mock" },
   @{ id = "sms/tencent_sms"; pkg = "./plugin-demo/pluginv1/sms_tencent_mock" },
   @{ id = "kyc/aliyun_kyc"; pkg = "./plugin-demo/pluginv1/kyc_aliyun_mock" },
-  @{ id = "kyc/tencent_kyc"; pkg = "./plugin-demo/pluginv1/kyc_tencent_mock" }
+  @{ id = "kyc/tencent_kyc"; pkg = "./plugin-demo/pluginv1/kyc_tencent_mock" },
+  @{ id = "automation/lightboat"; pkg = "./plugin-demo/pluginv1/automation_lightboat" }
 )
 
 $origGOOS = $env:GOOS

@@ -8,6 +8,7 @@ var (
 	ErrUnauthorized        = errors.New("unauthorized")
 	ErrConflict            = errors.New("conflict")
 	ErrInvalidInput        = errors.New("invalid input")
+	ErrNotSupported        = errors.New("not supported")
 	ErrNoPaymentRequired   = errors.New("no payment required")
 	ErrNoChanges           = errors.New("no changes")
 	ErrResizeSamePlan      = errors.New("resize target matches current plan")

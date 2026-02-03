@@ -3,6 +3,7 @@ import { getCatalog } from "@/services/user";
 
 export const useCatalogStore = defineStore("catalog", {
   state: () => ({
+    goodsTypes: [],
     regions: [],
     lines: [],
     planGroups: [],
@@ -17,6 +18,7 @@ export const useCatalogStore = defineStore("catalog", {
       try {
         const res = await getCatalog();
         const data = res.data || {};
+        const rawGoodsTypes = data.goods_types || [];
         const rawRegions = data.regions || [];
         const rawLines = data.lines || [];
         const rawGroups = data.plan_groups || [];
@@ -24,8 +26,20 @@ export const useCatalogStore = defineStore("catalog", {
         const rawImages = data.system_images || [];
         const rawCycles = data.billing_cycles || [];
 
+        this.goodsTypes = rawGoodsTypes.map((gt) => ({
+          id: gt.id ?? gt.ID,
+          code: gt.code ?? gt.Code,
+          name: gt.name ?? gt.Name,
+          active: gt.active ?? gt.Active,
+          sort_order: gt.sort_order ?? gt.SortOrder,
+          automation_category: gt.automation_category ?? gt.AutomationCategory,
+          automation_plugin_id: gt.automation_plugin_id ?? gt.AutomationPluginID,
+          automation_instance_id: gt.automation_instance_id ?? gt.AutomationInstanceID
+        }));
+
         this.regions = rawRegions.map((region) => ({
           id: region.id ?? region.ID,
+          goods_type_id: region.goods_type_id ?? region.GoodsTypeID,
           name: region.name ?? region.Name,
           code: region.code ?? region.Code,
           active: region.active ?? region.Active
@@ -34,6 +48,7 @@ export const useCatalogStore = defineStore("catalog", {
         const lineSource = rawLines.length ? rawLines : rawGroups;
         this.lines = lineSource.map((line) => ({
           id: line.id ?? line.ID,
+          goods_type_id: line.goods_type_id ?? line.GoodsTypeID,
           region_id: line.region_id ?? line.RegionID,
           name: line.name ?? line.Name ?? line.line_name ?? line.LineName,
           line_id: line.line_id ?? line.LineID,
@@ -61,6 +76,7 @@ export const useCatalogStore = defineStore("catalog", {
 
         this.planGroups = rawGroups.map((group) => ({
           id: group.id ?? group.ID,
+          goods_type_id: group.goods_type_id ?? group.GoodsTypeID,
           region_id: group.region_id ?? group.RegionID,
           line_id: group.line_id ?? group.LineID,
           name: group.name ?? group.Name ?? group.line_name ?? group.LineName,
@@ -75,6 +91,7 @@ export const useCatalogStore = defineStore("catalog", {
 
         this.packages = rawPackages.map((pkg) => ({
           id: pkg.id ?? pkg.ID,
+          goods_type_id: pkg.goods_type_id ?? pkg.GoodsTypeID,
           product_id: pkg.product_id ?? pkg.ProductID,
           plan_group_id: pkg.plan_group_id ?? pkg.PlanGroupID,
           name: pkg.name ?? pkg.Name,

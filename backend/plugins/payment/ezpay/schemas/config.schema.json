@@ -1,15 +1,43 @@
 {
-  "title": "EZPay Config",
+  "title": "EZPay",
   "type": "object",
   "properties": {
-    "base_url": { "type": "string", "title": "Gateway URL", "default": "https://pays.org.cn/submit.php" },
+    "gateway_base_url": {
+      "type": "string",
+      "title": "Gateway Base URL",
+      "default": "https://www.ezfpy.cn",
+      "description": "e.g. https://www.ezfpy.cn"
+    },
+    "submit_path": {
+      "type": "string",
+      "title": "Submit Path",
+      "default": "mapi.php",
+      "description": "Common values: submit.php (redirect) or mapi.php (API pay). Ignored when submit_url is set."
+    },
+    "submit_url": {
+      "type": "string",
+      "title": "Submit URL (optional override)",
+      "default": "",
+      "description": "If empty, {gateway_base_url}/{submit_path} is used."
+    },
+    "query_api_url": {
+      "type": "string",
+      "title": "Query API URL (optional)",
+      "default": "",
+      "description": "PHP-SDK-style: {gateway_base_url}/api.php?act=order ; Findorder: {gateway_base_url}/api/findorder"
+    },
     "pid": { "type": "string", "title": "Merchant PID" },
-    "key": { "type": "string", "title": "Merchant Key", "format": "password" },
-    "pay_type": { "type": "string", "title": "Pay Type", "default": "alipay" },
-    "notify_url": { "type": "string", "title": "Notify URL" },
-    "return_url": { "type": "string", "title": "Return URL" },
-    "sign_type": { "type": "string", "title": "Sign Type", "default": "MD5" }
+    "merchant_key": { "type": "string", "title": "Merchant Key", "format": "password", "x-secret": true },
+    "site_name": { "type": "string", "title": "Site Name (optional)", "default": "" },
+    "sign_type": { "type": "string", "title": "Sign Type", "default": "MD5" },
+    "sign_key_mode": {
+      "type": "string",
+      "title": "Sign Key Mode",
+      "default": "plain",
+      "enum": ["plain", "amp_key"],
+      "description": "plain => md5(query + key); amp_key => md5(query + '&key=' + key)"
+    },
+    "timeout_sec": { "type": "integer", "title": "HTTP Timeout (sec)", "default": 10, "minimum": 1, "maximum": 60 }
   },
-  "required": ["base_url", "pid", "key"]
+  "required": ["pid", "merchant_key"]
 }
-

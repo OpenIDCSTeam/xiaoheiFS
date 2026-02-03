@@ -6,24 +6,41 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"xiaoheiplay/pkg/pluginsdk"
 	pluginv1 "xiaoheiplay/plugin/v1"
 )
 
 type config struct {
+	GatewayBaseURL string `json:"gateway_base_url"`
+	SubmitURL      string `json:"submit_url"`
+	SubmitPath     string `json:"submit_path"`
+	QueryAPIURL    string `json:"query_api_url"`
+
+	PID         string `json:"pid"`
+	MerchantKey string `json:"merchant_key"`
+	SiteName    string `json:"site_name"`
+
+	SignType    string `json:"sign_type"`
+	SignKeyMode string `json:"sign_key_mode"`
+	TimeoutSec  int    `json:"timeout_sec"`
+
+	// Backward-compatible legacy keys (old demo config).
 	BaseURL   string `json:"base_url"`
-	PID       string `json:"pid"`
 	Key       string `json:"key"`
-	PayType   string `json:"pay_type"`
+	QueryURL  string `json:"query_url"`
 	NotifyURL string `json:"notify_url"`
 	ReturnURL string `json:"return_url"`
-	SignType  string `json:"sign_type"`
 }
 
 type coreServer struct {
@@ -38,10 +55,10 @@ func (s *coreServer) GetManifest(ctx context.Context, _ *pluginv1.Empty) (*plugi
 	_ = ctx
 	return &pluginv1.Manifest{
 		PluginId:    "ezpay",
-		Name:        "EZPay Aggregator (Demo)",
-		Version:     "0.1.0",
-		Description: "Minimal demo payment plugin. YiPay works; WeChat/Alipay are stubs.",
-		Payment:     &pluginv1.PaymentCapability{Methods: []string{"yipay", "wechatpay", "alipay"}},
+		Name:        "EZPay",
+		Version:     "1.0.0",
+		Description: "EZPay aggregate gateway (MD5). Fixed methods: alipay/wxpay/qqpay. Method switches are host-managed.",
+		Payment:     &pluginv1.PaymentCapability{Methods: []string{"alipay", "wxpay", "qqpay"}},
 	}, nil
 }
 
@@ -49,21 +66,25 @@ func (s *coreServer) GetConfigSchema(ctx context.Context, _ *pluginv1.Empty) (*p
 	_ = ctx
 	return &pluginv1.ConfigSchema{
 		JsonSchema: `{
-  "title": "EZPay Config",
+  "title": "EZPay",
   "type": "object",
   "properties": {
-    "base_url": { "type": "string", "title": "Gateway URL", "default": "https://pays.org.cn/submit.php" },
+    "gateway_base_url": { "type": "string", "title": "Gateway Base URL", "default": "https://www.ezfpy.cn", "description": "e.g. https://www.ezfpy.cn" },
+    "submit_path": { "type": "string", "title": "Submit Path", "default": "mapi.php", "description": "Common values: submit.php (redirect) or mapi.php (API pay). Ignored when submit_url is set." },
+    "submit_url": { "type": "string", "title": "Submit URL (optional override)", "default": "", "description": "If empty, {gateway_base_url}/{submit_path} is used." },
+    "query_api_url": { "type": "string", "title": "Query API URL (optional)", "default": "", "description": "PHP-SDK-style: {gateway_base_url}/api.php?act=order ; Findorder: {gateway_base_url}/api/findorder" },
     "pid": { "type": "string", "title": "Merchant PID" },
-    "key": { "type": "string", "title": "Merchant Key", "format": "password" },
-    "pay_type": { "type": "string", "title": "Pay Type", "default": "alipay" },
-    "notify_url": { "type": "string", "title": "Notify URL" },
-    "return_url": { "type": "string", "title": "Return URL" },
-    "sign_type": { "type": "string", "title": "Sign Type", "default": "MD5" }
+    "merchant_key": { "type": "string", "title": "Merchant Key", "format": "password", "x-secret": true },
+    "site_name": { "type": "string", "title": "Site Name (optional)", "default": "" },
+    "sign_type": { "type": "string", "title": "Sign Type", "default": "MD5" },
+    "sign_key_mode": { "type": "string", "title": "Sign Key Mode", "default": "plain", "enum": ["plain","amp_key"], "description": "plain => md5(query + key); amp_key => md5(query + '&key=' + key)" },
+    "timeout_sec": { "type": "integer", "title": "HTTP Timeout (sec)", "default": 10, "minimum": 1, "maximum": 60 }
   },
-  "required": ["base_url","pid","key"]
+  "required": ["pid","merchant_key"]
 }`,
 		UiSchema: `{
-  "key": { "ui:widget": "password", "ui:help": "留空表示不修改（由宿主处理）" }
+  "merchant_key": { "ui:widget": "password", "ui:help": "Leave empty means keep unchanged (handled by host)" },
+  "sign_type": { "ui:widget": "hidden" }
 }`,
 	}, nil
 }
@@ -74,8 +95,9 @@ func (s *coreServer) ValidateConfig(ctx context.Context, req *pluginv1.ValidateC
 	if err := json.Unmarshal([]byte(req.GetConfigJson()), &cfg); err != nil {
 		return &pluginv1.ValidateConfigResponse{Ok: false, Error: "invalid json"}, nil
 	}
-	if strings.TrimSpace(cfg.BaseURL) == "" || strings.TrimSpace(cfg.PID) == "" || strings.TrimSpace(cfg.Key) == "" {
-		return &pluginv1.ValidateConfigResponse{Ok: false, Error: "base_url/pid/key required"}, nil
+	normalizeConfig(&cfg)
+	if strings.TrimSpace(cfg.PID) == "" || strings.TrimSpace(cfg.MerchantKey) == "" {
+		return &pluginv1.ValidateConfigResponse{Ok: false, Error: "pid/merchant_key required"}, nil
 	}
 	return &pluginv1.ValidateConfigResponse{Ok: true}, nil
 }
@@ -86,6 +108,7 @@ func (s *coreServer) Init(ctx context.Context, req *pluginv1.InitRequest) (*plug
 		if err := json.Unmarshal([]byte(req.GetConfigJson()), &cfg); err != nil {
 			return &pluginv1.InitResponse{Ok: false, Error: "invalid config"}, nil
 		}
+		normalizeConfig(&cfg)
 		s.cfg = cfg
 	}
 	s.instance = req.GetInstanceId()
@@ -99,6 +122,7 @@ func (s *coreServer) ReloadConfig(ctx context.Context, req *pluginv1.ReloadConfi
 	if err := json.Unmarshal([]byte(req.GetConfigJson()), &cfg); err != nil {
 		return &pluginv1.ReloadConfigResponse{Ok: false, Error: "invalid config"}, nil
 	}
+	normalizeConfig(&cfg)
 	s.cfg = cfg
 	s.updatedAt = time.Now()
 	return &pluginv1.ReloadConfigResponse{Ok: true}, nil
@@ -124,111 +148,220 @@ type payServer struct {
 
 func (p *payServer) ListMethods(ctx context.Context, _ *pluginv1.Empty) (*pluginv1.ListMethodsResponse, error) {
 	_ = ctx
-	return &pluginv1.ListMethodsResponse{Methods: []string{"yipay", "wechatpay", "alipay"}}, nil
+	return &pluginv1.ListMethodsResponse{Methods: []string{"alipay", "wxpay", "qqpay"}}, nil
 }
 
 func (p *payServer) CreatePayment(ctx context.Context, req *pluginv1.CreatePaymentRpcRequest) (*pluginv1.PaymentCreateResponse, error) {
 	_ = ctx
 	method := strings.TrimSpace(req.GetMethod())
 	switch method {
-	case "yipay":
-		return p.createYiPay(req.GetRequest())
-	case "wechatpay", "alipay":
-		return &pluginv1.PaymentCreateResponse{Ok: false, Error: "stub: method not implemented yet"}, nil
+	case "alipay", "wxpay", "qqpay":
+		return p.createEZPay(method, req.GetRequest())
 	default:
-		return &pluginv1.PaymentCreateResponse{Ok: false, Error: "unknown method"}, nil
+		return nil, status.Error(codes.InvalidArgument, "unknown method")
 	}
 }
 
 func (p *payServer) QueryPayment(ctx context.Context, req *pluginv1.QueryPaymentRpcRequest) (*pluginv1.PaymentQueryResponse, error) {
-	_ = ctx
+	method := strings.TrimSpace(req.GetMethod())
+	if method != "alipay" && method != "wxpay" && method != "qqpay" {
+		return nil, status.Error(codes.InvalidArgument, "unknown method")
+	}
+
+	orderNo := strings.TrimSpace(req.GetOrderNo())
+	if orderNo == "" {
+		orderNo = strings.TrimSpace(req.GetTradeNo())
+	}
+	if orderNo == "" {
+		return nil, status.Error(codes.InvalidArgument, "order_no required")
+	}
+
+	cfg := p.core.cfg
+	queryURL := strings.TrimSpace(cfg.QueryAPIURL)
+	if queryURL == "" {
+		base := strings.TrimSpace(cfg.GatewayBaseURL)
+		if base == "" {
+			return nil, status.Error(codes.FailedPrecondition, "gateway_base_url or query_api_url required for QueryPayment")
+		}
+		// Default to PHP SDK style: GET api.php?act=order&pid=...&key=...&out_trade_no=...
+		queryURL = strings.TrimRight(base, "/") + "/api.php?act=order"
+	}
+
+	timeout := cfg.TimeoutSec
+	if timeout <= 0 {
+		timeout = 10
+	}
+	cctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	var httpReq *http.Request
+	switch detectQueryAPIKind(queryURL) {
+	case "findorder":
+		form := url.Values{}
+		form.Set("type", "1")
+		form.Set("order_no", orderNo)
+		httpReq, _ = http.NewRequestWithContext(cctx, http.MethodPost, queryURL, strings.NewReader(form.Encode()))
+		httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	case "api.php":
+		u, err := url.Parse(queryURL)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid query_api_url")
+		}
+		q := u.Query()
+		if strings.TrimSpace(q.Get("act")) == "" {
+			q.Set("act", "order")
+		}
+		q.Set("pid", strings.TrimSpace(cfg.PID))
+		q.Set("key", strings.TrimSpace(cfg.MerchantKey))
+		q.Set("out_trade_no", orderNo)
+		u.RawQuery = q.Encode()
+		httpReq, _ = http.NewRequestWithContext(cctx, http.MethodGet, u.String(), nil)
+	default:
+		return nil, status.Error(codes.InvalidArgument, "unsupported query_api_url")
+	}
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "ezpay query failed: "+err.Error())
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+
+	parsed := parseQueryResponse(b)
+	if !parsed.OK {
+		return nil, status.Error(codes.FailedPrecondition, parsed.Error)
+	}
 	return &pluginv1.PaymentQueryResponse{
 		Ok:      true,
-		Status:  pluginv1.PaymentStatus_PAYMENT_STATUS_PENDING,
-		TradeNo: req.GetTradeNo(),
+		Status:  parsed.Status,
+		TradeNo: parsed.TradeNo,
+		Amount:  parsed.Amount,
+		RawJson: string(b),
 	}, nil
 }
 
 func (p *payServer) Refund(ctx context.Context, req *pluginv1.RefundRpcRequest) (*pluginv1.RefundResponse, error) {
-	_ = ctx
 	_ = req
-	return &pluginv1.RefundResponse{Ok: false, Error: "refund not implemented"}, nil
+	return nil, status.Error(codes.Unimplemented, "ezpay refund not supported")
 }
 
 func (p *payServer) VerifyNotify(ctx context.Context, req *pluginv1.VerifyNotifyRequest) (*pluginv1.NotifyVerifyResult, error) {
-	_ = ctx
 	method := strings.TrimSpace(req.GetMethod())
-	switch method {
-	case "yipay":
-		return p.verifyYiPay(req.GetRaw())
-	case "wechatpay", "alipay":
-		return &pluginv1.NotifyVerifyResult{Ok: false, Error: "stub: method not implemented yet"}, nil
-	default:
-		return &pluginv1.NotifyVerifyResult{Ok: false, Error: "unknown method"}, nil
+	if method != "alipay" && method != "wxpay" && method != "qqpay" {
+		return nil, status.Error(codes.InvalidArgument, "unknown method")
 	}
+	return p.verifyEZPay(req.GetRaw(), method)
 }
 
-func (p *payServer) createYiPay(in *pluginv1.PaymentCreateRequest) (*pluginv1.PaymentCreateResponse, error) {
+func (p *payServer) createEZPay(method string, in *pluginv1.PaymentCreateRequest) (*pluginv1.PaymentCreateResponse, error) {
 	if in == nil {
-		return &pluginv1.PaymentCreateResponse{Ok: false, Error: "missing request"}, nil
+		return nil, status.Error(codes.InvalidArgument, "missing request")
 	}
 	cfg := p.core.cfg
-	if strings.TrimSpace(cfg.BaseURL) == "" {
-		return &pluginv1.PaymentCreateResponse{Ok: false, Error: "config missing"}, nil
+	if strings.TrimSpace(cfg.PID) == "" || strings.TrimSpace(cfg.MerchantKey) == "" {
+		return nil, status.Error(codes.FailedPrecondition, "config missing pid/merchant_key")
 	}
-	tradeNo := fmt.Sprintf("EZPAY-%s-%d", strings.TrimSpace(in.GetOrderNo()), time.Now().Unix())
+	if strings.TrimSpace(in.GetOrderNo()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "order_no required")
+	}
+	if strings.TrimSpace(in.GetNotifyUrl()) == "" || strings.TrimSpace(in.GetReturnUrl()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "notify_url/return_url required (host-generated)")
+	}
+	moneyStr, err := centsToYuanString(in.GetAmount())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	submitURL, err := resolveSubmitURL(cfg)
+	if err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+
 	params := map[string]string{
-		"pid":          cfg.PID,
-		"type":         cfg.PayType,
-		"out_trade_no": tradeNo,
-		"name":         in.GetSubject(),
-		"money":        fmt.Sprintf("%.2f", float64(in.GetAmount())/100.0),
-		"notify_url":   firstNonEmpty(in.GetNotifyUrl(), cfg.NotifyURL),
-		"return_url":   firstNonEmpty(in.GetReturnUrl(), cfg.ReturnURL),
+		"pid":          strings.TrimSpace(cfg.PID),
+		"type":         method,
+		"out_trade_no": strings.TrimSpace(in.GetOrderNo()),
+		"notify_url":   strings.TrimSpace(in.GetNotifyUrl()),
+		"return_url":   strings.TrimSpace(in.GetReturnUrl()),
+		"name":         strings.TrimSpace(in.GetSubject()),
+		"money":        moneyStr,
 		"sign_type":    firstNonEmpty(cfg.SignType, "MD5"),
 	}
-	params["sign"] = signYiPay(params, cfg.Key)
-	payURL := buildURL(cfg.BaseURL, params)
+	if strings.TrimSpace(cfg.SiteName) != "" {
+		params["sitename"] = strings.TrimSpace(cfg.SiteName)
+	}
+	if v := strings.TrimSpace(in.GetExtra()["param"]); v != "" {
+		params["param"] = v
+	}
+	if params["name"] == "" {
+		params["name"] = "Order " + params["out_trade_no"]
+	}
+	signMode := strings.ToLower(strings.TrimSpace(cfg.SignKeyMode))
+	if signMode == "" {
+		signMode = "plain"
+	}
+	params["sign"] = signEZPay(params, cfg.MerchantKey, signMode)
+	formHTML := buildAutoSubmitFormHTML(submitURL, params)
+
 	return &pluginv1.PaymentCreateResponse{
-		Ok:      true,
-		TradeNo: tradeNo,
-		PayUrl:  payURL,
-		Extra:   map[string]string{},
+		Ok:     true,
+		PayUrl: "",
+		Extra: map[string]string{
+			"pay_kind":  "form",
+			"form_html": formHTML,
+		},
 	}, nil
 }
 
-func (p *payServer) verifyYiPay(raw *pluginv1.RawHttpRequest) (*pluginv1.NotifyVerifyResult, error) {
+func (p *payServer) verifyEZPay(raw *pluginv1.RawHttpRequest, method string) (*pluginv1.NotifyVerifyResult, error) {
 	if raw == nil {
-		return &pluginv1.NotifyVerifyResult{Ok: false, Error: "missing raw request"}, nil
+		return nil, status.Error(codes.InvalidArgument, "missing raw request")
 	}
 	cfg := p.core.cfg
 	params := rawToParams(raw)
-	sign := params["sign"]
+
+	if strings.TrimSpace(cfg.PID) != "" && strings.TrimSpace(params["pid"]) != "" && strings.TrimSpace(params["pid"]) != strings.TrimSpace(cfg.PID) {
+		return nil, status.Error(codes.InvalidArgument, "pid mismatch")
+	}
+	if strings.TrimSpace(cfg.MerchantKey) == "" {
+		return nil, status.Error(codes.FailedPrecondition, "config missing merchant_key")
+	}
+	if st := strings.TrimSpace(params["sign_type"]); st != "" && strings.ToUpper(st) != "MD5" {
+		return nil, status.Error(codes.InvalidArgument, "unsupported sign_type")
+	}
+	if t := strings.TrimSpace(params["type"]); t != "" && method != "" && t != method {
+		return nil, status.Error(codes.InvalidArgument, "type mismatch")
+	}
+
+	sign := strings.TrimSpace(params["sign"])
 	if sign == "" {
-		return &pluginv1.NotifyVerifyResult{Ok: false, Error: "missing sign"}, nil
+		return nil, status.Error(codes.InvalidArgument, "missing sign")
 	}
-	expected := signYiPay(params, cfg.Key)
-	if !strings.EqualFold(sign, expected) {
-		return &pluginv1.NotifyVerifyResult{Ok: false, Error: "invalid sign"}, nil
+	if !verifyMD5Sign(params, cfg.MerchantKey, sign) {
+		return nil, status.Error(codes.InvalidArgument, "invalid sign")
 	}
-	status := strings.ToLower(params["trade_status"])
-	if status == "" {
-		status = strings.ToLower(params["status"])
+
+	outTradeNo := strings.TrimSpace(params["out_trade_no"])
+	if outTradeNo == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing out_trade_no")
 	}
-	paid := status == "trade_success" || status == "success"
-	ps := pluginv1.PaymentStatus_PAYMENT_STATUS_PENDING
-	if paid {
-		ps = pluginv1.PaymentStatus_PAYMENT_STATUS_PAID
-	}
-	amountCents := parseMoneyToCents(params["money"])
-	tradeNo := params["out_trade_no"]
+	tradeNo := strings.TrimSpace(params["trade_no"])
 	if tradeNo == "" {
-		return &pluginv1.NotifyVerifyResult{Ok: false, Error: "missing out_trade_no"}, nil
+		tradeNo = outTradeNo
 	}
+
+	tradeStatus := strings.TrimSpace(params["trade_status"])
+	ps := mapEZPayTradeStatus(tradeStatus)
+
+	amountCents, err := parseMoneyToCentsStrict(params["money"])
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid money")
+	}
+
 	rawJSON, _ := json.Marshal(params)
 	return &pluginv1.NotifyVerifyResult{
 		Ok:      true,
-		OrderNo: tradeNo,
+		OrderNo: outTradeNo,
 		TradeNo: tradeNo,
 		Amount:  amountCents,
 		Status:  ps,
@@ -266,7 +399,156 @@ func rawToParams(req *pluginv1.RawHttpRequest) map[string]string {
 	return out
 }
 
-func signYiPay(params map[string]string, key string) string {
+func detectQueryAPIKind(queryURL string) string {
+	u := strings.ToLower(strings.TrimSpace(queryURL))
+	if strings.Contains(u, "/api/findorder") {
+		return "findorder"
+	}
+	if strings.Contains(u, "/api.php") {
+		return "api.php"
+	}
+	return ""
+}
+
+func mapEZPayTradeStatus(tradeStatus string) pluginv1.PaymentStatus {
+	s := strings.ToUpper(strings.TrimSpace(tradeStatus))
+	switch s {
+	case "TRADE_SUCCESS":
+		return pluginv1.PaymentStatus_PAYMENT_STATUS_PAID
+	case "TRADE_CLOSED", "CLOSED":
+		return pluginv1.PaymentStatus_PAYMENT_STATUS_CLOSED
+	case "TRADE_FAIL", "FAIL", "FAILED":
+		return pluginv1.PaymentStatus_PAYMENT_STATUS_FAILED
+	default:
+		// Important: only TRADE_SUCCESS counts as success.
+		return pluginv1.PaymentStatus_PAYMENT_STATUS_PENDING
+	}
+}
+
+type queryParseResult struct {
+	OK      bool
+	Error   string
+	Status  pluginv1.PaymentStatus
+	TradeNo string
+	Amount  int64
+}
+
+func parseQueryResponse(b []byte) queryParseResult {
+	raw := strings.TrimSpace(string(b))
+	if raw == "" {
+		return queryParseResult{OK: false, Error: "ezpay query empty response"}
+	}
+
+	// Try findorder response: {code:200,msg:"",data:[{...}]}
+	type findorderResp struct {
+		Code int               `json:"code"`
+		Msg  string            `json:"msg"`
+		Data []json.RawMessage `json:"data"`
+	}
+	var fo findorderResp
+	if err := json.Unmarshal(b, &fo); err == nil && fo.Code != 0 {
+		if fo.Code != 200 {
+			return queryParseResult{OK: false, Error: fmt.Sprintf("ezpay query failed: code=%d msg=%s", fo.Code, fo.Msg)}
+		}
+		if len(fo.Data) == 0 {
+			return queryParseResult{OK: false, Error: "ezpay query empty data"}
+		}
+		var item map[string]any
+		_ = json.Unmarshal(fo.Data[0], &item)
+		return parseQueryItem(item)
+	}
+
+	// Try generic JSON object
+	var obj map[string]any
+	if err := json.Unmarshal(b, &obj); err == nil && len(obj) > 0 {
+		// Some APIs might wrap the order under "data"
+		if v, ok := obj["data"]; ok {
+			if m, ok2 := v.(map[string]any); ok2 {
+				return parseQueryItem(m)
+			}
+			if arr, ok2 := v.([]any); ok2 && len(arr) > 0 {
+				if m, ok3 := arr[0].(map[string]any); ok3 {
+					return parseQueryItem(m)
+				}
+			}
+		}
+		return parseQueryItem(obj)
+	}
+
+	return queryParseResult{OK: false, Error: "ezpay query invalid response"}
+}
+
+func parseQueryItem(item map[string]any) queryParseResult {
+	if len(item) == 0 {
+		return queryParseResult{OK: false, Error: "ezpay query empty item"}
+	}
+	tradeStatus := fmt.Sprintf("%v", item["trade_status"])
+	if tradeStatus == "" || tradeStatus == "<nil>" {
+		tradeStatus = fmt.Sprintf("%v", item["status"])
+	}
+	status := mapEZPayTradeStatus(tradeStatus)
+
+	tradeNo := fmt.Sprintf("%v", item["trade_no"])
+	if tradeNo == "" || tradeNo == "<nil>" {
+		tradeNo = fmt.Sprintf("%v", item["transaction_id"])
+	}
+	if tradeNo == "<nil>" {
+		tradeNo = ""
+	}
+
+	amountCents := int64(0)
+	moneyVal, hasMoney := item["money"]
+	if !hasMoney {
+		moneyVal = item["amount"]
+	}
+	if moneyVal != nil {
+		switch v := moneyVal.(type) {
+		case string:
+			if c, err := parseMoneyToCentsStrict(v); err == nil {
+				amountCents = c
+			}
+		default:
+			if c, err := parseMoneyToCentsStrict(fmt.Sprintf("%v", v)); err == nil {
+				amountCents = c
+			}
+		}
+	}
+
+	return queryParseResult{
+		OK:      true,
+		Status:  status,
+		TradeNo: tradeNo,
+		Amount:  amountCents,
+	}
+}
+
+func phpStripslashes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch != '\\' || i+1 >= len(s) {
+			b.WriteByte(ch)
+			continue
+		}
+		next := s[i+1]
+		switch next {
+		case '\\', '\'', '"':
+			b.WriteByte(next)
+			i++
+			continue
+		case '0':
+			b.WriteByte(0)
+			i++
+			continue
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
+}
+
+func signEZPay(params map[string]string, key string, mode string) string {
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		if k == "sign" || k == "sign_type" {
@@ -285,47 +567,164 @@ func signYiPay(params map[string]string, key string) string {
 		}
 		buf.WriteString(k)
 		buf.WriteByte('=')
-		buf.WriteString(params[k])
+		buf.WriteString(phpStripslashes(params[k]))
 	}
-	buf.WriteString(key)
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "amp_key":
+		buf.WriteString("&key=")
+		buf.WriteString(key)
+	case "plain", "":
+		buf.WriteString(key)
+	default:
+		buf.WriteString(key)
+	}
 	sum := md5.Sum([]byte(buf.String()))
 	return hex.EncodeToString(sum[:])
 }
 
-func buildURL(base string, params map[string]string) string {
-	q := url.Values{}
-	for k, v := range params {
-		if strings.TrimSpace(v) == "" {
-			continue
-		}
-		q.Set(k, v)
+func verifyMD5Sign(params map[string]string, key string, sign string) bool {
+	// Always accept both common modes for notify verification.
+	a := signEZPay(params, key, "amp_key")
+	if strings.EqualFold(a, sign) {
+		return true
 	}
-	if strings.Contains(base, "?") {
-		return base + "&" + q.Encode()
-	}
-	return base + "?" + q.Encode()
+	b := signEZPay(params, key, "plain")
+	return strings.EqualFold(b, sign)
 }
 
-func parseMoneyToCents(v string) int64 {
+func parseMoneyToCentsStrict(v string) (int64, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return 0
+		return 0, fmt.Errorf("money required")
 	}
+	neg := false
+	if strings.HasPrefix(v, "-") {
+		neg = true
+		v = strings.TrimPrefix(v, "-")
+	}
+	if v == "" {
+		return 0, fmt.Errorf("money invalid")
+	}
+	intPart := v
+	fracPart := ""
 	if strings.Contains(v, ".") {
 		parts := strings.SplitN(v, ".", 2)
-		i, _ := strconv.ParseInt(parts[0], 10, 64)
-		frac := parts[1]
-		if len(frac) > 2 {
-			frac = frac[:2]
-		}
-		for len(frac) < 2 {
-			frac += "0"
-		}
-		f, _ := strconv.ParseInt(frac, 10, 64)
-		return i*100 + f
+		intPart = parts[0]
+		fracPart = parts[1]
 	}
-	i, _ := strconv.ParseInt(v, 10, 64)
-	return i * 100
+	if intPart == "" {
+		intPart = "0"
+	}
+	i, err := strconv.ParseInt(intPart, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("money invalid")
+	}
+	if fracPart != "" {
+		if len(fracPart) > 2 {
+			fracPart = fracPart[:2]
+		}
+		for len(fracPart) < 2 {
+			fracPart += "0"
+		}
+	} else {
+		fracPart = "00"
+	}
+	f, err := strconv.ParseInt(fracPart, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("money invalid")
+	}
+	out := i*100 + f
+	if neg {
+		out = -out
+	}
+	return out, nil
+}
+
+func centsToYuanString(cents int64) (string, error) {
+	if cents <= 0 {
+		return "", fmt.Errorf("amount must be > 0")
+	}
+	yuan := cents / 100
+	rem := cents % 100
+	if rem < 0 {
+		rem = -rem
+	}
+	return fmt.Sprintf("%d.%02d", yuan, rem), nil
+}
+
+func normalizeConfig(cfg *config) {
+	if cfg == nil {
+		return
+	}
+	if strings.TrimSpace(cfg.MerchantKey) == "" && strings.TrimSpace(cfg.Key) != "" {
+		cfg.MerchantKey = cfg.Key
+	}
+	if strings.TrimSpace(cfg.QueryAPIURL) == "" && strings.TrimSpace(cfg.QueryURL) != "" {
+		cfg.QueryAPIURL = cfg.QueryURL
+	}
+	if strings.TrimSpace(cfg.BaseURL) != "" {
+		base := strings.TrimSpace(cfg.BaseURL)
+		if strings.TrimSpace(cfg.SubmitURL) == "" && strings.HasSuffix(strings.ToLower(base), "/submit.php") {
+			cfg.SubmitURL = base
+		}
+		if strings.TrimSpace(cfg.GatewayBaseURL) == "" && !strings.HasSuffix(strings.ToLower(base), "/submit.php") {
+			cfg.GatewayBaseURL = base
+		}
+	}
+	if strings.TrimSpace(cfg.SignKeyMode) == "" {
+		cfg.SignKeyMode = "plain"
+	}
+}
+
+func resolveSubmitURL(cfg config) (string, error) {
+	if strings.TrimSpace(cfg.SubmitURL) != "" {
+		return strings.TrimSpace(cfg.SubmitURL), nil
+	}
+	if strings.TrimSpace(cfg.GatewayBaseURL) == "" {
+		return "", fmt.Errorf("gateway_base_url or submit_url required")
+	}
+	path := strings.TrimSpace(cfg.SubmitPath)
+	if path == "" {
+		path = "mapi.php"
+	}
+	path = strings.TrimPrefix(path, "/")
+	return strings.TrimRight(strings.TrimSpace(cfg.GatewayBaseURL), "/") + "/" + path, nil
+}
+
+func buildAutoSubmitFormHTML(action string, params map[string]string) string {
+	var b strings.Builder
+	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><title>Redirecting...</title></head><body>")
+	b.WriteString("<form id=\"pay\" method=\"post\" action=\"")
+	b.WriteString(htmlEscape(action))
+	b.WriteString("\">")
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		if strings.TrimSpace(params[k]) == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.WriteString("<input type=\"hidden\" name=\"")
+		b.WriteString(htmlEscape(k))
+		b.WriteString("\" value=\"")
+		b.WriteString(htmlEscape(params[k]))
+		b.WriteString("\"/>")
+	}
+	b.WriteString("</form><script>document.getElementById('pay').submit();</script></body></html>")
+	return b.String()
+}
+
+func htmlEscape(s string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"\"", "&quot;",
+		"'", "&#39;",
+	)
+	return replacer.Replace(s)
 }
 
 func firstNonEmpty(v string, fallback string) string {

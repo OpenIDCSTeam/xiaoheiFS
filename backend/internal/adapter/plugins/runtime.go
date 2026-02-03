@@ -3,8 +3,12 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,12 +33,13 @@ type runningPlugin struct {
 	pluginID   string
 	instanceID string
 
-	client   *plugin.Client
-	core     pluginv1.CoreServiceClient
-	sms      pluginv1.SmsServiceClient
-	payment  pluginv1.PaymentServiceClient
-	kyc      pluginv1.KycServiceClient
-	manifest *pluginv1.Manifest
+	client     *plugin.Client
+	core       pluginv1.CoreServiceClient
+	sms        pluginv1.SmsServiceClient
+	payment    pluginv1.PaymentServiceClient
+	kyc        pluginv1.KycServiceClient
+	automation pluginv1.AutomationServiceClient
+	manifest   *pluginv1.Manifest
 
 	lastHealth time.Time
 	health     *pluginv1.HealthCheckResponse
@@ -45,15 +50,155 @@ func NewRuntime(baseDir string) *Runtime {
 	return &Runtime{baseDir: baseDir, running: map[string]*runningPlugin{}}
 }
 
-func (r *Runtime) key(category, pluginID string) string {
-	return category + ":" + pluginID
+func automationFeatureFromString(s string) (pluginv1.AutomationFeature, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "catalog_sync":
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_CATALOG_SYNC, true
+	case "lifecycle":
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_LIFECYCLE, true
+	case "port_mapping":
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_PORT_MAPPING, true
+	case "backup":
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_BACKUP, true
+	case "snapshot":
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_SNAPSHOT, true
+	case "firewall":
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_FIREWALL, true
+	default:
+		return pluginv1.AutomationFeature_AUTOMATION_FEATURE_UNSPECIFIED, false
+	}
+}
+
+func normalizeAutomationNotSupportedReasons(m map[string]string) map[int32]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := map[int32]string{}
+	for k, v := range m {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		// allow either numeric enum value ("3") or feature name ("port_mapping")
+		if i, err := strconv.Atoi(key); err == nil {
+			out[int32(i)] = v
+			continue
+		}
+		if f, ok := automationFeatureFromString(key); ok {
+			out[int32(f)] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func validateManifestConsistency(jsonM Manifest, grpcM *pluginv1.Manifest) error {
+	if grpcM == nil {
+		return errors.New("invalid manifest")
+	}
+	jPluginID := strings.TrimSpace(jsonM.PluginID)
+	jName := strings.TrimSpace(jsonM.Name)
+	jVersion := strings.TrimSpace(jsonM.Version)
+
+	gPluginID := strings.TrimSpace(grpcM.GetPluginId())
+	gName := strings.TrimSpace(grpcM.GetName())
+	gVersion := strings.TrimSpace(grpcM.GetVersion())
+
+	if gPluginID != jPluginID {
+		return fmt.Errorf("manifest mismatch: plugin_id (json=%q grpc=%q)", jPluginID, gPluginID)
+	}
+	if gName != jName {
+		return fmt.Errorf("manifest mismatch: name (json=%q grpc=%q)", jName, gName)
+	}
+	if gVersion != jVersion {
+		return fmt.Errorf("manifest mismatch: version (json=%q grpc=%q)", jVersion, gVersion)
+	}
+
+	// sms
+	if (jsonM.Capabilities.SMS != nil) != (grpcM.Sms != nil) {
+		return errors.New("manifest mismatch: sms capability presence")
+	}
+	if jsonM.Capabilities.SMS != nil && grpcM.Sms != nil {
+		if grpcM.Sms.GetSend() != jsonM.Capabilities.SMS.Send {
+			return errors.New("manifest mismatch: sms.send")
+		}
+	}
+
+	// payment
+	if (jsonM.Capabilities.Payment != nil) != (grpcM.Payment != nil) {
+		return errors.New("manifest mismatch: payment capability presence")
+	}
+	if jsonM.Capabilities.Payment != nil && grpcM.Payment != nil {
+		jm := append([]string{}, jsonM.Capabilities.Payment.Methods...)
+		gm := append([]string{}, grpcM.Payment.GetMethods()...)
+		sort.Strings(jm)
+		sort.Strings(gm)
+		if !slices.Equal(jm, gm) {
+			return errors.New("manifest mismatch: payment.methods")
+		}
+	}
+
+	// kyc
+	if (jsonM.Capabilities.KYC != nil) != (grpcM.Kyc != nil) {
+		return errors.New("manifest mismatch: kyc capability presence")
+	}
+	if jsonM.Capabilities.KYC != nil && grpcM.Kyc != nil {
+		if grpcM.Kyc.GetStart() != jsonM.Capabilities.KYC.Start || grpcM.Kyc.GetQueryResult() != jsonM.Capabilities.KYC.QueryResult {
+			return errors.New("manifest mismatch: kyc flags")
+		}
+	}
+
+	// automation
+	if (jsonM.Capabilities.Automation != nil) != (grpcM.Automation != nil) {
+		return errors.New("manifest mismatch: automation capability presence")
+	}
+	if jsonM.Capabilities.Automation != nil && grpcM.Automation != nil {
+		want := map[pluginv1.AutomationFeature]bool{}
+		for _, s := range jsonM.Capabilities.Automation.Features {
+			f, ok := automationFeatureFromString(s)
+			if !ok {
+				return fmt.Errorf("invalid manifest automation feature: %s", s)
+			}
+			want[f] = true
+		}
+		got := map[pluginv1.AutomationFeature]bool{}
+		for _, f := range grpcM.Automation.GetFeatures() {
+			got[f] = true
+		}
+		if len(want) != len(got) {
+			return errors.New("manifest mismatch: automation.features")
+		}
+		for f := range want {
+			if !got[f] {
+				return errors.New("manifest mismatch: automation.features")
+			}
+		}
+		jReasons := normalizeAutomationNotSupportedReasons(jsonM.Capabilities.Automation.NotSupportedReason)
+		gReasons := grpcM.Automation.GetNotSupportedReasons()
+		if len(jReasons) != len(gReasons) {
+			return errors.New("manifest mismatch: automation.not_supported_reasons")
+		}
+		for k, v := range jReasons {
+			if gReasons[k] != v {
+				return errors.New("manifest mismatch: automation.not_supported_reasons")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *Runtime) key(category, pluginID, instanceID string) string {
+	return category + ":" + pluginID + ":" + instanceID
 }
 
 func (r *Runtime) Start(ctx context.Context, category, pluginID, instanceID, configJSON string) (*pluginv1.Manifest, error) {
 	if category == "" || pluginID == "" || instanceID == "" {
 		return nil, errors.New("invalid input")
 	}
-	k := r.key(category, pluginID)
+	k := r.key(category, pluginID, instanceID)
 
 	r.mu.Lock()
 	if existing := r.running[k]; existing != nil {
@@ -84,10 +229,11 @@ func (r *Runtime) Start(ctx context.Context, category, pluginID, instanceID, con
 			plugin.ProtocolGRPC,
 		},
 		Plugins: map[string]plugin.Plugin{
-			pluginsdk.PluginKeyCore:    &pluginsdk.CoreGRPCPlugin{},
-			pluginsdk.PluginKeySMS:     &pluginsdk.SmsGRPCPlugin{},
-			pluginsdk.PluginKeyPayment: &pluginsdk.PaymentGRPCPlugin{},
-			pluginsdk.PluginKeyKYC:     &pluginsdk.KycGRPCPlugin{},
+			pluginsdk.PluginKeyCore:       &pluginsdk.CoreGRPCPlugin{},
+			pluginsdk.PluginKeySMS:        &pluginsdk.SmsGRPCPlugin{},
+			pluginsdk.PluginKeyPayment:    &pluginsdk.PaymentGRPCPlugin{},
+			pluginsdk.PluginKeyKYC:        &pluginsdk.KycGRPCPlugin{},
+			pluginsdk.PluginKeyAutomation: &pluginsdk.AutomationGRPCPlugin{},
 		},
 		Cmd: cmd,
 	})
@@ -119,10 +265,15 @@ func (r *Runtime) Start(ctx context.Context, category, pluginID, instanceID, con
 		client.Kill()
 		return nil, errors.New("invalid manifest")
 	}
+	if err := validateManifestConsistency(manifestJSON, manifest); err != nil {
+		client.Kill()
+		return nil, err
+	}
 
 	var sms pluginv1.SmsServiceClient
 	var payment pluginv1.PaymentServiceClient
 	var kyc pluginv1.KycServiceClient
+	var automation pluginv1.AutomationServiceClient
 
 	if manifest.Sms != nil {
 		raw, err := rpcClient.Dispense(pluginsdk.PluginKeySMS)
@@ -163,6 +314,19 @@ func (r *Runtime) Start(ctx context.Context, category, pluginID, instanceID, con
 		}
 		kyc = c
 	}
+	if manifest.Automation != nil {
+		raw, err := rpcClient.Dispense(pluginsdk.PluginKeyAutomation)
+		if err != nil {
+			client.Kill()
+			return nil, err
+		}
+		c, ok := raw.(pluginv1.AutomationServiceClient)
+		if !ok {
+			client.Kill()
+			return nil, errors.New("invalid automation client")
+		}
+		automation = c
+	}
 
 	ctxi, cancelInit := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelInit()
@@ -189,6 +353,7 @@ func (r *Runtime) Start(ctx context.Context, category, pluginID, instanceID, con
 		sms:        sms,
 		payment:    payment,
 		kyc:        kyc,
+		automation: automation,
 		manifest:   manifest,
 		cancelHB:   hbCancel,
 		health:     nil,
@@ -203,8 +368,8 @@ func (r *Runtime) Start(ctx context.Context, category, pluginID, instanceID, con
 	return manifest, nil
 }
 
-func (r *Runtime) Stop(category, pluginID string) {
-	k := r.key(category, pluginID)
+func (r *Runtime) Stop(category, pluginID, instanceID string) {
+	k := r.key(category, pluginID, instanceID)
 	r.mu.Lock()
 	rp := r.running[k]
 	delete(r.running, k)
@@ -220,8 +385,8 @@ func (r *Runtime) Stop(category, pluginID string) {
 	}
 }
 
-func (r *Runtime) GetRunning(category, pluginID string) (*runningPlugin, bool) {
-	k := r.key(category, pluginID)
+func (r *Runtime) GetRunning(category, pluginID, instanceID string) (*runningPlugin, bool) {
+	k := r.key(category, pluginID, instanceID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rp := r.running[k]

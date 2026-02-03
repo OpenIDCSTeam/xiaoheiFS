@@ -1,0 +1,231 @@
+syntax = "proto3";
+
+package plugin.v1;
+
+option go_package = "xiaoheiplay/plugin/v1;pluginv1";
+
+import "plugin/v1/types.proto";
+
+service AutomationService {
+  // Catalog sync
+  rpc ListAreas(Empty) returns (ListAreasResponse);
+  rpc ListLines(Empty) returns (ListLinesResponse);
+  rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+
+  // Instance lifecycle
+  rpc CreateInstance(CreateInstanceRequest) returns (CreateInstanceResponse);
+  rpc GetInstance(GetInstanceRequest) returns (GetInstanceResponse);
+  rpc ListInstancesSimple(ListInstancesSimpleRequest) returns (ListInstancesSimpleResponse);
+  rpc Start(StartRequest) returns (Empty);
+  rpc Shutdown(ShutdownRequest) returns (Empty);
+  rpc Reboot(RebootRequest) returns (Empty);
+  rpc Rebuild(RebuildRequest) returns (Empty);
+  rpc ResetPassword(ResetPasswordRequest) returns (Empty);
+  rpc ElasticUpdate(ElasticUpdateRequest) returns (Empty);
+  rpc Lock(LockRequest) returns (Empty);
+  rpc Unlock(UnlockRequest) returns (Empty);
+  rpc Renew(RenewRequest) returns (Empty);
+  rpc Destroy(DestroyRequest) returns (Empty);
+  rpc GetPanelURL(GetPanelURLRequest) returns (GetPanelURLResponse);
+  rpc GetVNCURL(GetVNCURLRequest) returns (GetVNCURLResponse);
+  rpc GetMonitor(GetMonitorRequest) returns (GetMonitorResponse);
+
+  // Port mapping (optional)
+  rpc ListPortMappings(ListPortMappingsRequest) returns (ListPortMappingsResponse);
+  rpc AddPortMapping(AddPortMappingRequest) returns (Empty);
+  rpc DeletePortMapping(DeletePortMappingRequest) returns (Empty);
+  rpc FindPortCandidates(FindPortCandidatesRequest) returns (FindPortCandidatesResponse);
+
+  // Backup (optional)
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc CreateBackup(CreateBackupRequest) returns (Empty);
+  rpc DeleteBackup(DeleteBackupRequest) returns (Empty);
+  rpc RestoreBackup(RestoreBackupRequest) returns (Empty);
+
+  // Snapshot (optional)
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (Empty);
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (Empty);
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns (Empty);
+
+  // Firewall (optional)
+  rpc ListFirewallRules(ListFirewallRulesRequest) returns (ListFirewallRulesResponse);
+  rpc AddFirewallRule(AddFirewallRuleRequest) returns (Empty);
+  rpc DeleteFirewallRule(DeleteFirewallRuleRequest) returns (Empty);
+}
+
+message AutomationArea {
+  int64 id = 1;
+  string name = 2;
+  int32 state = 3;
+}
+
+message AutomationLine {
+  int64 id = 1;
+  string name = 2;
+  int64 area_id = 3;
+  int32 state = 4;
+}
+
+message AutomationPackage {
+  int64 id = 1;
+  string name = 2;
+  int32 cpu = 3;
+  int32 memory_gb = 4;
+  int32 disk_gb = 5;
+  int32 bandwidth_mbps = 6;
+  int32 port_num = 7;
+  int64 monthly_price = 8;
+}
+
+message AutomationImage {
+  int64 id = 1;
+  string name = 2;
+  string type = 3;
+}
+
+message AutomationInstance {
+  int64 id = 1;
+  string name = 2;
+  int32 state = 3;
+  int32 cpu = 4;
+  int32 memory_gb = 5;
+  int32 disk_gb = 6;
+  int32 bandwidth_mbps = 7;
+  string remote_ip = 8;
+  string panel_password = 9;
+  string vnc_password = 10;
+  string os_password = 11;
+  int64 expire_at_unix = 12;
+}
+
+message ListAreasResponse { repeated AutomationArea items = 1; }
+message ListLinesResponse { repeated AutomationLine items = 1; }
+
+message ListPackagesRequest { int64 line_id = 1; }
+message ListPackagesResponse { repeated AutomationPackage items = 1; }
+
+message ListImagesRequest { int64 line_id = 1; }
+message ListImagesResponse { repeated AutomationImage items = 1; }
+
+message CreateInstanceRequest {
+  int64 line_id = 1;
+  // For providers that support SKU/package based provisioning (optional).
+  int64 package_id = 2;
+  // image_id is preferred; os is a legacy alternative.
+  int64 image_id = 3;
+  string name = 4;
+  string os = 5;
+  // password is the OS password; some providers may accept separate panel/vnc passwords.
+  string password = 6;
+  string vnc_password = 7;
+  int64 expire_at_unix = 8;
+  int32 port_num = 9;
+  // For providers that require explicit resource specs (optional).
+  int32 cpu = 10;
+  int32 memory_gb = 11;
+  int32 disk_gb = 12;
+  int32 bandwidth_mbps = 13;
+}
+message CreateInstanceResponse { int64 instance_id = 1; }
+
+message GetInstanceRequest { int64 instance_id = 1; }
+message GetInstanceResponse { AutomationInstance instance = 1; }
+
+message AutomationInstanceSimple {
+  int64 id = 1;
+  string name = 2;
+  string ip = 3;
+}
+message ListInstancesSimpleRequest { string search_tag = 1; }
+message ListInstancesSimpleResponse { repeated AutomationInstanceSimple items = 1; }
+
+message StartRequest { int64 instance_id = 1; }
+message ShutdownRequest { int64 instance_id = 1; }
+message RebootRequest { int64 instance_id = 1; }
+
+message RebuildRequest {
+  int64 instance_id = 1;
+  int64 image_id = 2;
+  string password = 3;
+}
+
+message ResetPasswordRequest { int64 instance_id = 1; string password = 2; }
+
+message ElasticUpdateRequest {
+  int64 instance_id = 1;
+  optional int32 cpu = 2;
+  optional int32 memory_gb = 3;
+  optional int32 disk_gb = 4;
+  optional int32 bandwidth_mbps = 5;
+  optional int32 port_num = 6;
+}
+message LockRequest { int64 instance_id = 1; }
+message UnlockRequest { int64 instance_id = 1; }
+
+message RenewRequest { int64 instance_id = 1; int64 next_due_at_unix = 2; }
+message DestroyRequest { int64 instance_id = 1; }
+
+message GetPanelURLRequest { string instance_name = 1; string panel_password = 2; }
+message GetPanelURLResponse { string url = 1; }
+
+message GetVNCURLRequest { int64 instance_id = 1; }
+message GetVNCURLResponse { string url = 1; }
+
+message GetMonitorRequest { int64 instance_id = 1; }
+message GetMonitorResponse { string raw_json = 1; }
+
+message AutomationPortMapping {
+  int64 id = 1;
+  string name = 2;
+  // sport (public port) is provider-specific and may be a range (e.g. "20000-20010").
+  string sport = 3;
+  int64 dport = 4;
+}
+
+message ListPortMappingsRequest { int64 instance_id = 1; }
+message ListPortMappingsResponse { repeated AutomationPortMapping items = 1; }
+message AddPortMappingRequest {
+  int64 instance_id = 1;
+  string name = 2;
+  string sport = 3;
+  int64 dport = 4;
+}
+message DeletePortMappingRequest { int64 instance_id = 1; int64 mapping_id = 2; }
+message FindPortCandidatesRequest { int64 instance_id = 1; string keywords = 2; }
+message FindPortCandidatesResponse { repeated int64 ports = 1; }
+
+message AutomationBackup { int64 id = 1; string name = 2; int64 created_at_unix = 3; }
+message ListBackupsRequest { int64 instance_id = 1; }
+message ListBackupsResponse { repeated AutomationBackup items = 1; }
+message CreateBackupRequest { int64 instance_id = 1; }
+message DeleteBackupRequest { int64 instance_id = 1; int64 backup_id = 2; }
+message RestoreBackupRequest { int64 instance_id = 1; int64 backup_id = 2; }
+
+message AutomationSnapshot { int64 id = 1; string name = 2; int64 created_at_unix = 3; }
+message ListSnapshotsRequest { int64 instance_id = 1; }
+message ListSnapshotsResponse { repeated AutomationSnapshot items = 1; }
+message CreateSnapshotRequest { int64 instance_id = 1; }
+message DeleteSnapshotRequest { int64 instance_id = 1; int64 snapshot_id = 2; }
+message RestoreSnapshotRequest { int64 instance_id = 1; int64 snapshot_id = 2; }
+
+message AutomationFirewallRule {
+  int64 id = 1;
+  string direction = 2;
+  string protocol = 3;
+  string method = 4;
+  string port = 5;
+  string ip = 6;
+}
+message ListFirewallRulesRequest { int64 instance_id = 1; }
+message ListFirewallRulesResponse { repeated AutomationFirewallRule items = 1; }
+message AddFirewallRuleRequest {
+  int64 instance_id = 1;
+  string direction = 2;
+  string protocol = 3;
+  string method = 4;
+  string port = 5;
+  string ip = 6;
+}
+message DeleteFirewallRuleRequest { int64 instance_id = 1; int64 rule_id = 2; }

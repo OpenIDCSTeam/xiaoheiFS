@@ -12,6 +12,8 @@ func migrateGorm(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&userRow{},
 		&captchaRow{},
+		&verificationCodeRow{},
+		&goodsTypeRow{},
 		&regionRow{},
 		&planGroupRow{},
 		&packageRow{},
@@ -49,6 +51,7 @@ func migrateGorm(db *gorm.DB) error {
 		&notificationRow{},
 		&realnameVerificationRow{},
 		&pluginInstallationRow{},
+		&pluginPaymentMethodRow{},
 	)
 }
 
@@ -80,22 +83,51 @@ type captchaRow struct {
 
 func (captchaRow) TableName() string { return "captchas" }
 
-type regionRow struct {
+type verificationCodeRow struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement;column:id"`
-	Code      string    `gorm:"column:code;not null;uniqueIndex"`
-	Name      string    `gorm:"column:name;not null"`
-	Active    int       `gorm:"column:active;not null;default:1"`
+	Channel   string    `gorm:"column:channel;not null;index:idx_verification_codes_receiver,priority:1"`
+	Receiver  string    `gorm:"column:receiver;not null;index:idx_verification_codes_receiver,priority:2"`
+	Purpose   string    `gorm:"column:purpose;not null;index:idx_verification_codes_receiver,priority:3"`
+	CodeHash  string    `gorm:"column:code_hash;not null"`
+	ExpiresAt time.Time `gorm:"column:expires_at;not null;index:idx_verification_codes_expires"`
 	CreatedAt time.Time `gorm:"column:created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (verificationCodeRow) TableName() string { return "verification_codes" }
+
+type goodsTypeRow struct {
+	ID                   int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	Code                 string    `gorm:"column:code;uniqueIndex:idx_goods_types_code_unique,where:code <> ''"`
+	Name                 string    `gorm:"column:name;not null"`
+	Active               int       `gorm:"column:active;not null;default:1"`
+	SortOrder            int       `gorm:"column:sort_order;not null;default:0"`
+	AutomationCategory   string    `gorm:"column:automation_category;not null;default:automation;uniqueIndex:idx_goods_types_automation_unique"`
+	AutomationPluginID   string    `gorm:"column:automation_plugin_id;not null;default:'';uniqueIndex:idx_goods_types_automation_unique"`
+	AutomationInstanceID string    `gorm:"column:automation_instance_id;not null;default:'';uniqueIndex:idx_goods_types_automation_unique"`
+	CreatedAt            time.Time `gorm:"column:created_at"`
+	UpdatedAt            time.Time `gorm:"column:updated_at"`
+}
+
+func (goodsTypeRow) TableName() string { return "goods_types" }
+
+type regionRow struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	GoodsTypeID int64     `gorm:"column:goods_type_id;not null;default:0;index;uniqueIndex:idx_regions_gt_code_unique"`
+	Code        string    `gorm:"column:code;not null;uniqueIndex:idx_regions_gt_code_unique"`
+	Name        string    `gorm:"column:name;not null"`
+	Active      int       `gorm:"column:active;not null;default:1"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
 
 func (regionRow) TableName() string { return "regions" }
 
 type planGroupRow struct {
 	ID                int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	GoodsTypeID       int64     `gorm:"column:goods_type_id;not null;default:0;index;uniqueIndex:idx_plan_groups_gt_line_unique,where:line_id > 0"`
 	RegionID          int64     `gorm:"column:region_id;not null;index"`
 	Name              string    `gorm:"column:name;not null"`
-	LineID            int64     `gorm:"column:line_id;not null;default:0;index"`
+	LineID            int64     `gorm:"column:line_id;not null;default:0;index;uniqueIndex:idx_plan_groups_gt_line_unique,where:line_id > 0"`
 	UnitCore          int64     `gorm:"column:unit_core;not null"`
 	UnitMem           int64     `gorm:"column:unit_mem;not null"`
 	UnitDisk          int64     `gorm:"column:unit_disk;not null"`
@@ -124,8 +156,9 @@ func (planGroupRow) TableName() string { return "plan_groups" }
 
 type packageRow struct {
 	ID                int64     `gorm:"primaryKey;autoIncrement;column:id"`
-	PlanGroupID       int64     `gorm:"column:plan_group_id;not null;index"`
-	ProductID         int64     `gorm:"column:product_id;not null;default:0"`
+	GoodsTypeID       int64     `gorm:"column:goods_type_id;not null;default:0;index;uniqueIndex:idx_packages_gt_product_unique,where:product_id > 0"`
+	PlanGroupID       int64     `gorm:"column:plan_group_id;not null;index;uniqueIndex:idx_packages_gt_product_unique,where:product_id > 0"`
+	ProductID         int64     `gorm:"column:product_id;not null;default:0;uniqueIndex:idx_packages_gt_product_unique,where:product_id > 0"`
 	Name              string    `gorm:"column:name;not null"`
 	Cores             int       `gorm:"column:cores;not null"`
 	MemoryGB          int       `gorm:"column:memory_gb;not null"`
@@ -206,6 +239,7 @@ type orderItemRow struct {
 	Qty                  int       `gorm:"column:qty;not null;default:1"`
 	Amount               int64     `gorm:"column:amount;not null"`
 	Status               string    `gorm:"column:status;not null"`
+	GoodsTypeID          int64     `gorm:"column:goods_type_id;not null;default:0;index"`
 	AutomationInstanceID string    `gorm:"column:automation_instance_id"`
 	Action               string    `gorm:"column:action;not null;default:create"`
 	DurationMonths       int       `gorm:"column:duration_months;not null;default:1"`
@@ -220,6 +254,7 @@ type vpsInstanceRow struct {
 	UserID               int64      `gorm:"column:user_id;not null;index"`
 	OrderItemID          int64      `gorm:"column:order_item_id;not null;index"`
 	AutomationInstanceID string     `gorm:"column:automation_instance_id;not null"`
+	GoodsTypeID          int64      `gorm:"column:goods_type_id;not null;default:0;index"`
 	Name                 string     `gorm:"column:name;not null"`
 	Region               string     `gorm:"column:region"`
 	RegionID             int64      `gorm:"column:region_id;not null;default:0"`
@@ -612,9 +647,9 @@ func (realnameVerificationRow) TableName() string { return "realname_verificatio
 
 type pluginInstallationRow struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement;column:id"`
-	Category        string    `gorm:"column:category;not null;uniqueIndex:idx_plugin_installations_cat_id"`
-	PluginID        string    `gorm:"column:plugin_id;not null;uniqueIndex:idx_plugin_installations_cat_id"`
-	InstanceID      string    `gorm:"column:instance_id;not null"`
+	Category        string    `gorm:"column:category;not null;uniqueIndex:idx_plugin_installations_cat_id_instance"`
+	PluginID        string    `gorm:"column:plugin_id;not null;uniqueIndex:idx_plugin_installations_cat_id_instance"`
+	InstanceID      string    `gorm:"column:instance_id;not null;uniqueIndex:idx_plugin_installations_cat_id_instance"`
 	Enabled         int       `gorm:"column:enabled;not null;default:0"`
 	SignatureStatus string    `gorm:"column:signature_status;not null;default:unsigned"`
 	ConfigCipher    string    `gorm:"column:config_cipher;not null"`
@@ -623,3 +658,16 @@ type pluginInstallationRow struct {
 }
 
 func (pluginInstallationRow) TableName() string { return "plugin_installations" }
+
+type pluginPaymentMethodRow struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	Category   string    `gorm:"column:category;not null;uniqueIndex:idx_plugin_payment_methods_unique"`
+	PluginID   string    `gorm:"column:plugin_id;not null;uniqueIndex:idx_plugin_payment_methods_unique"`
+	InstanceID string    `gorm:"column:instance_id;not null;uniqueIndex:idx_plugin_payment_methods_unique"`
+	Method     string    `gorm:"column:method;not null;uniqueIndex:idx_plugin_payment_methods_unique"`
+	Enabled    int       `gorm:"column:enabled;not null;default:1"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at"`
+}
+
+func (pluginPaymentMethodRow) TableName() string { return "plugin_payment_methods" }

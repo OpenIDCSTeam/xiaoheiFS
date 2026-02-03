@@ -13,6 +13,7 @@
           <!-- Step Indicator -->
           <div class="steps-wrapper">
             <a-steps :current="stepIndex" size="small">
+              <a-step title="Goods Type" />
               <a-step title="选择地区" />
               <a-step title="选择线路" />
               <a-step title="选择套餐" />
@@ -24,6 +25,15 @@
           <a-divider style="margin: 20px 0" />
 
           <a-form layout="vertical">
+            <a-form-item label="Goods Type">
+              <a-select
+                v-model:value="form.goodsTypeId"
+                placeholder="Select goods type"
+                size="large"
+                :options="goodsTypeOptions"
+              />
+            </a-form-item>
+            <template v-if="form.goodsTypeId">
             <!-- Region Selection -->
             <a-form-item label="选择地区">
               <a-select
@@ -35,6 +45,7 @@
               </a-select>
             </a-form-item>
 
+            </template>
             <!-- Line Selection -->
             <template v-if="form.regionId">
               <a-form-item label="选择线路">
@@ -331,6 +342,7 @@ const cart = useCartStore();
 const router = useRouter();
 
 const form = reactive({
+  goodsTypeId: null,
   regionId: null,
   planGroupId: null,
   packageId: null,
@@ -347,13 +359,27 @@ const form = reactive({
 const systemImages = ref([]);
 const loadingImages = ref(false);
 
-const regions = computed(() => catalog.regions.filter((r) => r.active !== false));
+const goodsTypes = computed(() => (catalog.goodsTypes || []).filter((gt) => gt.active !== false));
+const goodsTypeOptions = computed(() => goodsTypes.value.map((gt) => ({ label: gt.name, value: gt.id })));
+
+const regions = computed(() =>
+  catalog.regions.filter((r) => {
+    if (r.active === false) return false;
+    if (!form.goodsTypeId) return false;
+    return String(r.goods_type_id) === String(form.goodsTypeId);
+  })
+);
 const regionOptions = computed(() =>
   regions.value.map(r => ({ label: r.name, value: r.id }))
 );
 
 const planGroups = computed(() =>
-  catalog.planGroups.filter((g) => g.active !== false && g.visible !== false && g.region_id === form.regionId)
+  catalog.planGroups.filter((g) => {
+    if (g.active === false || g.visible === false) return false;
+    if (!form.regionId) return false;
+    if (form.goodsTypeId && String(g.goods_type_id) !== String(form.goodsTypeId)) return false;
+    return g.region_id === form.regionId;
+  })
 );
 
 const packages = computed(() => {
@@ -410,11 +436,12 @@ const cycleMultiplier = computed(() => {
 });
 
 const stepIndex = computed(() => {
-  if (!form.regionId) return 0;
-  if (!form.planGroupId) return 1;
-  if (!form.packageId) return 2;
-  if (!form.systemId) return 3;
-  return 4;
+  if (!form.goodsTypeId) return 0;
+  if (!form.regionId) return 1;
+  if (!form.planGroupId) return 2;
+  if (!form.packageId) return 3;
+  if (!form.systemId) return 4;
+  return 5;
 });
 
 const hasAddons = computed(() =>
@@ -458,6 +485,13 @@ const selectPackage = (pkg) => {
 };
 
 // Reset downstream selections when upstream changes
+watch(() => form.goodsTypeId, () => {
+  form.regionId = null;
+  form.planGroupId = null;
+  form.packageId = null;
+  form.systemId = null;
+});
+
 watch(() => form.regionId, () => {
   form.planGroupId = null;
   form.packageId = null;
@@ -474,6 +508,12 @@ watch(() => form.packageId, () => {
 });
 
 // Auto-select first available option
+watch(goodsTypes, (list) => {
+  if (!form.goodsTypeId && list.length) {
+    form.goodsTypeId = list[0].id;
+  }
+}, { immediate: true });
+
 watch(regions, (list) => {
   if (!form.regionId && list.length) {
     form.regionId = list[0].id;

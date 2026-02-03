@@ -1,8 +1,8 @@
 {
   "plugin_id": "tencent_kyc",
-  "name": "Tencent Cloud FaceID/eKYC (Mock)",
-  "version": "0.1.0",
-  "description": "Mock KYC plugin. Replace with real Tencent Cloud FaceID calls.",
+  "name": "Tencent Cloud FaceID",
+  "version": "1.0.0",
+  "description": "Tencent Cloud FaceID DetectAuth/GetDetectInfo flow (H5).",
   "binaries": {
     "windows_amd64": "bin/windows_amd64/plugin.exe",
     "linux_amd64": "bin/linux_amd64/plugin",

@@ -66,7 +66,7 @@ func (m *Manager) BootstrapFromDisk(ctx context.Context, settings usecase.Settin
 			inst := domain.PluginInstallation{
 				Category:        p.Category,
 				PluginID:        p.PluginID,
-				InstanceID:      newInstanceID(p.Category, p.PluginID),
+				InstanceID:      DefaultInstanceID,
 				Enabled:         false,
 				SignatureStatus: sigStatus,
 				ConfigCipher:    "",
@@ -94,7 +94,7 @@ func (m *Manager) BootstrapFromDisk(ctx context.Context, settings usecase.Settin
 		inst := domain.PluginInstallation{
 			Category:        p.Category,
 			PluginID:        p.PluginID,
-			InstanceID:      newInstanceID(p.Category, p.PluginID),
+			InstanceID:      DefaultInstanceID,
 			Enabled:         false,
 			SignatureStatus: sigStatus,
 			ConfigCipher:    "",
@@ -182,16 +182,17 @@ func (m *Manager) ImportFromDisk(ctx context.Context, category, pluginID string)
 	}
 
 	// Upsert without touching enabled/config (new import defaults to disabled/empty).
-	if inst, err := m.repo.GetPluginInstallation(ctx, category, pluginID); err == nil {
+	const instanceID = "default"
+	if inst, err := m.repo.GetPluginInstallation(ctx, category, pluginID, instanceID); err == nil {
 		inst.SignatureStatus = sigStatus
 		_ = m.repo.UpsertPluginInstallation(ctx, &inst)
-		return m.repo.GetPluginInstallation(ctx, category, pluginID)
+		return m.repo.GetPluginInstallation(ctx, category, pluginID, instanceID)
 	}
 
 	inst := domain.PluginInstallation{
 		Category:        category,
 		PluginID:        pluginID,
-		InstanceID:      newInstanceID(category, pluginID),
+		InstanceID:      instanceID,
 		Enabled:         false,
 		SignatureStatus: sigStatus,
 		ConfigCipher:    "",
@@ -202,7 +203,7 @@ func (m *Manager) ImportFromDisk(ctx context.Context, category, pluginID string)
 		return domain.PluginInstallation{}, err
 	}
 	_ = entry // resolved above to validate availability
-	return m.repo.GetPluginInstallation(ctx, category, pluginID)
+	return m.repo.GetPluginInstallation(ctx, category, pluginID, instanceID)
 }
 
 func (m *Manager) SignatureStatusOnDisk(category, pluginID string) (domain.PluginSignatureStatus, error) {

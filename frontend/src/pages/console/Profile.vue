@@ -94,6 +94,13 @@
               <span class="info-value">{{ profile?.qq || "-" }}</span>
             </div>
           </div>
+          <div class="info-item">
+            <PhoneOutlined class="item-icon" />
+            <div class="info-content">
+              <span class="info-label">手机号</span>
+              <span class="info-value">{{ profile?.phone || "-" }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -199,6 +206,13 @@
             </template>
           </a-input>
         </a-form-item>
+        <a-form-item label="手机号" name="phone">
+          <a-input v-model:value="form.phone" placeholder="请输入手机号" size="large">
+            <template #prefix>
+              <PhoneOutlined />
+            </template>
+          </a-input>
+        </a-form-item>
         <a-divider class="form-divider">
           <LockOutlined class="divider-icon" />
           修改密码
@@ -245,6 +259,7 @@ import {
   UserOutlined,
   CheckCircleOutlined,
   QqOutlined,
+  PhoneOutlined,
   TransactionOutlined,
   DollarOutlined,
   SyncOutlined,
@@ -272,6 +287,7 @@ const form = reactive({
   username: "",
   email: "",
   qq: "",
+  phone: "",
   password: "",
   confirmPassword: ""
 });
@@ -283,6 +299,19 @@ const rules = {
   ],
   email: [
     { type: "email", message: "请输入有效的邮箱地址", trigger: "blur" }
+  ],
+  phone: [
+    {
+      validator: (rule, value) => {
+        const v = String(value || "").trim();
+        if (!v) return Promise.resolve();
+        if (!/^[0-9+\\-\\s]{6,20}$/.test(v)) {
+          return Promise.reject("请输入有效手机号");
+        }
+        return Promise.resolve();
+      },
+      trigger: "blur"
+    }
   ],
   confirmPassword: [
     {
@@ -311,6 +340,7 @@ watch(
     form.username = val.username || "";
     form.email = val.email || "";
     form.qq = val.qq || "";
+    form.phone = val.phone || "";
   },
   { immediate: true }
 );
@@ -319,6 +349,7 @@ const openEditModal = () => {
   form.username = profile.value?.username || "";
   form.email = profile.value?.email || "";
   form.qq = profile.value?.qq || "";
+  form.phone = profile.value?.phone || "";
   form.password = "";
   form.confirmPassword = "";
   editModalVisible.value = true;
@@ -340,7 +371,8 @@ const handleSubmit = async () => {
     const payload = {
       username: form.username,
       email: form.email,
-      qq: form.qq
+      qq: form.qq,
+      phone: form.phone
     };
     if (form.password) {
       payload.password = form.password;

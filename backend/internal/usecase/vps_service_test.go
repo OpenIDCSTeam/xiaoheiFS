@@ -38,7 +38,8 @@ func TestVPSService_GetForbidden(t *testing.T) {
 	if err := repo.CreateInstance(context.Background(), &inst); err != nil {
 		t.Fatalf("create vps: %v", err)
 	}
-	svc := usecase.NewVPSService(repo, &testutil.FakeAutomationClient{}, repo)
+	autoResolver := &testutil.FakeAutomationResolver{Client: &testutil.FakeAutomationClient{}}
+	svc := usecase.NewVPSService(repo, autoResolver, repo)
 	if _, err := svc.Get(context.Background(), inst.ID, other.ID); err != usecase.ErrForbidden {
 		t.Fatalf("expected forbidden, got %v", err)
 	}
@@ -76,7 +77,8 @@ func TestVPSService_RefreshStatus(t *testing.T) {
 			100: {HostID: 100, State: 2, ExpireAt: &expire, RemoteIP: "2.2.2.2"},
 		},
 	}
-	svc := usecase.NewVPSService(repo, fakeAuto, repo)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewVPSService(repo, autoResolver, repo)
 	if _, err := svc.RefreshStatus(context.Background(), inst); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -88,7 +90,8 @@ func TestVPSService_Actions(t *testing.T) {
 	inst := createVPSInstance(t, repo, user.ID, "200")
 
 	fakeAuto := &testutil.FakeAutomationClient{}
-	svc := usecase.NewVPSService(repo, fakeAuto, repo)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewVPSService(repo, autoResolver, repo)
 
 	if err := svc.Start(context.Background(), inst); err != nil {
 		t.Fatalf("start: %v", err)
@@ -115,7 +118,8 @@ func TestVPSService_RenewAndEmergency(t *testing.T) {
 	user := testutil.CreateUser(t, repo, "v5", "v5@example.com", "pass")
 	inst := createVPSInstance(t, repo, user.ID, "300")
 	fakeAuto := &testutil.FakeAutomationClient{}
-	svc := usecase.NewVPSService(repo, fakeAuto, repo)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewVPSService(repo, autoResolver, repo)
 
 	if err := svc.RenewNow(context.Background(), inst, 1); err != nil {
 		t.Fatalf("renew now: %v", err)

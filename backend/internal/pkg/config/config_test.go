@@ -29,7 +29,8 @@ func TestLoadFromYAMLFile(t *testing.T) {
 	if cfg.Addr != ":9999" {
 		t.Fatalf("expected addr from yaml, got %q", cfg.Addr)
 	}
-	if cfg.DBPath != "./data/test.db" {
+	wantDBPath := filepath.Join(td, "data", "test.db")
+	if cfg.DBPath != wantDBPath {
 		t.Fatalf("expected db path from yaml, got %q", cfg.DBPath)
 	}
 	if cfg.JWTSecret != "fixed" {

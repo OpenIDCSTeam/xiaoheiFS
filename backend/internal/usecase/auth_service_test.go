@@ -11,7 +11,7 @@ import (
 
 func TestAuthService_RegisterLogin(t *testing.T) {
 	_, repo := testutil.NewTestDB(t, false)
-	svc := usecase.NewAuthService(repo, repo)
+	svc := usecase.NewAuthService(repo, repo, repo)
 
 	captcha, code, err := svc.CreateCaptcha(context.Background(), time.Minute)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestAuthService_RegisterLogin(t *testing.T) {
 
 func TestAuthService_LoginFailures(t *testing.T) {
 	_, repo := testutil.NewTestDB(t, false)
-	svc := usecase.NewAuthService(repo, repo)
+	svc := usecase.NewAuthService(repo, repo, repo)
 
 	if _, err := svc.Login(context.Background(), "missing", "pass"); err != usecase.ErrUnauthorized {
 		t.Fatalf("expected unauthorized, got %v", err)
@@ -49,7 +49,7 @@ func TestAuthService_LoginFailures(t *testing.T) {
 
 func TestAuthService_RegisterCaptchaFail(t *testing.T) {
 	_, repo := testutil.NewTestDB(t, false)
-	svc := usecase.NewAuthService(repo, repo)
+	svc := usecase.NewAuthService(repo, repo, repo)
 
 	_, err := svc.Register(context.Background(), usecase.RegisterInput{
 		Username:    "bob",

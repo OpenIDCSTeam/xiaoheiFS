@@ -27,7 +27,7 @@ type OrderService struct {
 	vps         VPSRepository
 	wallets     WalletRepository
 	events      EventPublisher
-	automation  AutomationClient
+	automation  AutomationClientResolver
 	robot       RobotNotifier
 	audit       AuditRepository
 	users       UserRepository
@@ -57,8 +57,15 @@ type PaymentInput struct {
 	ScreenshotURL string `json:"screenshot_url"`
 }
 
-func NewOrderService(orders OrderRepository, items OrderItemRepository, cart CartRepository, catalog CatalogRepository, images SystemImageRepository, billing BillingCycleRepository, vps VPSRepository, wallets WalletRepository, payments PaymentRepository, events EventPublisher, automation AutomationClient, robot RobotNotifier, audit AuditRepository, users UserRepository, email EmailSender, settings SettingsRepository, autoLogs AutomationLogRepository, provision ProvisionJobRepository, resizeTasks ResizeTaskRepository, messages *MessageCenterService, realname *RealNameService) *OrderService {
+func NewOrderService(orders OrderRepository, items OrderItemRepository, cart CartRepository, catalog CatalogRepository, images SystemImageRepository, billing BillingCycleRepository, vps VPSRepository, wallets WalletRepository, payments PaymentRepository, events EventPublisher, automation AutomationClientResolver, robot RobotNotifier, audit AuditRepository, users UserRepository, email EmailSender, settings SettingsRepository, autoLogs AutomationLogRepository, provision ProvisionJobRepository, resizeTasks ResizeTaskRepository, messages *MessageCenterService, realname *RealNameService) *OrderService {
 	return &OrderService{orders: orders, items: items, cart: cart, catalog: catalog, images: images, billing: billing, vps: vps, wallets: wallets, payments: payments, events: events, automation: automation, robot: robot, audit: audit, users: users, email: email, settings: settings, autoLogs: autoLogs, provision: provision, resizeTasks: resizeTasks, messages: messages, realname: realname}
+}
+
+func (s *OrderService) client(ctx context.Context, goodsTypeID int64) (AutomationClient, error) {
+	if s.automation == nil {
+		return nil, ErrInvalidInput
+	}
+	return s.automation.ClientForGoodsType(ctx, goodsTypeID)
 }
 
 func (s *OrderService) CreateOrderFromCart(ctx context.Context, userID int64, currency string, idemKey string) (domain.Order, []domain.OrderItem, error) {
@@ -99,6 +106,10 @@ func (s *OrderService) CreateOrderFromCart(ctx context.Context, userID int64, cu
 
 	var orderItems []domain.OrderItem
 	for _, item := range items {
+		pkg, err := s.catalog.GetPackage(ctx, item.PackageID)
+		if err != nil {
+			return domain.Order{}, nil, err
+		}
 		unitAmount := item.Amount
 		remainder := int64(0)
 		if item.Qty > 0 {
@@ -119,6 +130,7 @@ func (s *OrderService) CreateOrderFromCart(ctx context.Context, userID int64, cu
 				Qty:            1,
 				Amount:         amount,
 				Status:         domain.OrderItemStatusPendingPayment,
+				GoodsTypeID:    pkg.GoodsTypeID,
 				Action:         "create",
 				DurationMonths: durationMonths,
 			})
@@ -189,6 +201,10 @@ func (s *OrderService) CreateOrderFromItems(ctx context.Context, userID int64, c
 		if err != nil {
 			return domain.Order{}, nil, err
 		}
+		pkg, err := s.catalog.GetPackage(ctx, in.PackageID)
+		if err != nil {
+			return domain.Order{}, nil, err
+		}
 		qty := in.Qty
 		if qty <= 0 {
 			qty = 1
@@ -205,6 +221,7 @@ func (s *OrderService) CreateOrderFromItems(ctx context.Context, userID int64, c
 				Qty:            1,
 				Amount:         unitAmount,
 				Status:         domain.OrderItemStatusPendingPayment,
+				GoodsTypeID:    pkg.GoodsTypeID,
 				Action:         "create",
 				DurationMonths: months,
 			})
@@ -450,7 +467,11 @@ func (s *OrderService) RefreshOrder(ctx context.Context, userID int64, orderID i
 		if hostID == 0 {
 			continue
 		}
-		info, err := s.automation.GetHostInfo(itemCtx, hostID)
+		cli, err := s.client(itemCtx, inst.GoodsTypeID)
+		if err != nil {
+			continue
+		}
+		info, err := cli.GetHostInfo(itemCtx, hostID)
 		if err != nil {
 			continue
 		}
@@ -808,6 +829,10 @@ func (s *OrderService) provisionItem(ctx context.Context, order domain.Order, it
 	if err != nil {
 		return domain.VPSInstance{}, err
 	}
+	cli, err := s.client(ctx, pkg.GoodsTypeID)
+	if err != nil {
+		return domain.VPSInstance{}, err
+	}
 	plan, err := s.catalog.GetPlanGroup(ctx, pkg.PlanGroupID)
 	if err != nil {
 		return domain.VPSInstance{}, err
@@ -849,7 +874,7 @@ func (s *OrderService) provisionItem(ctx context.Context, order domain.Order, it
 		SysPwd:     sysPwd,
 		VNCPwd:     vncPwd,
 	}
-	res, err := s.automation.CreateHost(ctx, req)
+	res, err := cli.CreateHost(ctx, req)
 	if err != nil {
 		s.logAutomation(ctx, order.ID, item.ID, "create_host", req, map[string]any{"error": err.Error()}, false, err.Error())
 		return domain.VPSInstance{}, err
@@ -858,7 +883,7 @@ func (s *OrderService) provisionItem(ctx context.Context, order domain.Order, it
 	if res.HostID > 0 {
 		hostID = res.HostID
 	} else {
-		hosts, _ := s.automation.ListHostSimple(ctx, hostName)
+		hosts, _ := cli.ListHostSimple(ctx, hostName)
 		for _, h := range hosts {
 			if h.HostName == hostName {
 				hostID = h.ID
@@ -870,7 +895,7 @@ func (s *OrderService) provisionItem(ctx context.Context, order domain.Order, it
 		s.logAutomation(ctx, order.ID, item.ID, "create_host", req, res.Raw, false, "host id not found")
 		return domain.VPSInstance{}, fmt.Errorf("host id not found")
 	}
-	info, err := s.waitHostActive(ctx, hostID, 5, 6*time.Second)
+	info, err := s.waitHostActive(ctx, cli, hostID, 5, 6*time.Second)
 	if err != nil {
 		if errors.Is(err, ErrProvisioning) {
 			if err := s.ensureProvisioningInstance(ctx, order, item, hostID, hostName, sysPwd, vncPwd, expireAt); err != nil {
@@ -900,6 +925,7 @@ func (s *OrderService) provisionItem(ctx context.Context, order domain.Order, it
 		UserID:               order.UserID,
 		OrderItemID:          item.ID,
 		AutomationInstanceID: fmt.Sprintf("%d", hostID),
+		GoodsTypeID:          pkg.GoodsTypeID,
 		Name:                 info.HostName,
 		Region:               snap.Region,
 		RegionID:             snap.RegionID,
@@ -951,16 +977,20 @@ func (s *OrderService) handleRenew(ctx context.Context, item domain.OrderItem) e
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
 	next := time.Now().Add(time.Duration(payload.RenewDays) * 24 * time.Hour)
 	if inst.ExpireAt != nil && inst.ExpireAt.After(time.Now()) {
 		next = inst.ExpireAt.Add(time.Duration(payload.RenewDays) * 24 * time.Hour)
 	}
-	if err := s.automation.RenewHost(ctx, hostID, next); err != nil {
+	if err := cli.RenewHost(ctx, hostID, next); err != nil {
 		s.logAutomation(ctx, item.OrderID, item.ID, "renew", map[string]any{"host_id": hostID, "next_due": next}, map[string]any{"error": err.Error()}, false, err.Error())
 		return err
 	}
 	if inst.AdminStatus != domain.VPSAdminStatusNormal || inst.Status == domain.VPSStatusExpiredLocked {
-		_ = s.automation.UnlockHost(ctx, hostID)
+		_ = cli.UnlockHost(ctx, hostID)
 	}
 	_ = s.vps.UpdateInstanceExpireAt(ctx, inst.ID, next)
 	_ = s.vps.UpdateInstanceSpec(ctx, inst.ID, setCurrentPeriod(inst.SpecJSON, time.Now(), next))
@@ -1004,16 +1034,20 @@ func (s *OrderService) handleEmergencyRenew(ctx context.Context, item domain.Ord
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
 	next := time.Now().Add(time.Duration(renewDays) * 24 * time.Hour)
 	if inst.ExpireAt != nil && inst.ExpireAt.After(time.Now()) {
 		next = inst.ExpireAt.Add(time.Duration(renewDays) * 24 * time.Hour)
 	}
-	if err := s.automation.RenewHost(ctx, hostID, next); err != nil {
+	if err := cli.RenewHost(ctx, hostID, next); err != nil {
 		s.logAutomation(ctx, item.OrderID, item.ID, "emergency_renew", map[string]any{"host_id": hostID, "next_due": next}, map[string]any{"error": err.Error()}, false, err.Error())
 		return err
 	}
 	if inst.AdminStatus != domain.VPSAdminStatusNormal || inst.Status == domain.VPSStatusExpiredLocked {
-		_ = s.automation.UnlockHost(ctx, hostID)
+		_ = cli.UnlockHost(ctx, hostID)
 	}
 	_ = s.vps.UpdateInstanceExpireAt(ctx, inst.ID, next)
 	_ = s.vps.UpdateInstanceSpec(ctx, inst.ID, setCurrentPeriod(inst.SpecJSON, time.Now(), next))
@@ -1047,6 +1081,10 @@ func (s *OrderService) handleResize(ctx context.Context, item domain.OrderItem) 
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
 	cpu := payload.TargetCPU
 	mem := payload.TargetMemGB
 	disk := payload.TargetDiskGB
@@ -1064,7 +1102,7 @@ func (s *OrderService) handleResize(ctx context.Context, item domain.OrderItem) 
 	if bw > 0 {
 		req.Bandwidth = &bw
 	}
-	if err := s.automation.ElasticUpdate(ctx, req); err != nil {
+	if err := cli.ElasticUpdate(ctx, req); err != nil {
 		s.logAutomation(ctx, item.OrderID, item.ID, "elastic_update", req, map[string]any{"error": err.Error()}, false, err.Error())
 		return err
 	}
@@ -1073,6 +1111,9 @@ func (s *OrderService) handleResize(ctx context.Context, item domain.OrderItem) 
 		targetPkgID = payload.TargetPackageID
 	}
 	if pkg, err := s.catalog.GetPackage(ctx, targetPkgID); err == nil {
+		if pkg.GoodsTypeID > 0 && inst.GoodsTypeID > 0 && pkg.GoodsTypeID != inst.GoodsTypeID {
+			return ErrInvalidInput
+		}
 		plan, _ := s.catalog.GetPlanGroup(ctx, pkg.PlanGroupID)
 		inst.PackageID = pkg.ID
 		inst.PackageName = pkg.Name
@@ -1105,7 +1146,7 @@ func (s *OrderService) handleResize(ctx context.Context, item domain.OrderItem) 
 			}
 		}
 	}
-	if info, err := s.automation.GetHostInfo(ctx, hostID); err == nil {
+	if info, err := cli.GetHostInfo(ctx, hostID); err == nil {
 		status := MapAutomationState(info.State)
 		_ = s.vps.UpdateInstanceStatus(ctx, inst.ID, status, info.State)
 		if info.ExpireAt != nil {
@@ -1201,7 +1242,11 @@ func (s *OrderService) deleteVPSForRefund(ctx context.Context, inst domain.VPSIn
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	if err := s.automation.DeleteHost(ctx, hostID); err != nil {
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	if err := cli.DeleteHost(ctx, hostID); err != nil {
 		return err
 	}
 	return s.vps.DeleteInstance(ctx, inst.ID)
@@ -1477,10 +1522,10 @@ func resolveBillingCycle(ctx context.Context, billing BillingCycleRepository, sp
 	return months, multiplier, nil
 }
 
-func (s *OrderService) waitHostActive(ctx context.Context, hostID int64, attempts int, interval time.Duration) (AutomationHostInfo, error) {
+func (s *OrderService) waitHostActive(ctx context.Context, cli AutomationClient, hostID int64, attempts int, interval time.Duration) (AutomationHostInfo, error) {
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		info, err := s.automation.GetHostInfo(ctx, hostID)
+		info, err := cli.GetHostInfo(ctx, hostID)
 		if err != nil {
 			lastErr = err
 		} else {
@@ -1590,6 +1635,7 @@ func (s *OrderService) ensureProvisioningInstance(ctx context.Context, order dom
 		UserID:               order.UserID,
 		OrderItemID:          item.ID,
 		AutomationInstanceID: fmt.Sprintf("%d", hostID),
+		GoodsTypeID:          item.GoodsTypeID,
 		Name:                 hostName,
 		Region:               snap.Region,
 		RegionID:             snap.RegionID,

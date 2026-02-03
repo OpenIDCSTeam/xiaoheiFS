@@ -109,7 +109,22 @@
                 <template #prefix>
                   <LockOutlined class="input-icon" />
                 </template>
-              </a-input-password>
+            </a-input-password>
+          </a-form-item>
+
+            <a-form-item
+              v-if="settings.login_captcha_enabled"
+              label="图形验证码"
+              name="captcha_code"
+              :rules="[{ required: true, message: '请输入验证码' }]"
+            >
+              <div class="captcha">
+                <a-input v-model:value="form.captcha_code" placeholder="验证码" class="input-field" />
+                <div class="captcha-img" @click="refreshCaptcha">
+                  <img v-if="captchaImage" :src="captchaImage" alt="captcha" />
+                  <span v-else>点击刷新</span>
+                </div>
+              </div>
             </a-form-item>
 
             <div class="form-actions">
@@ -167,13 +182,15 @@
 import { reactive, ref, onMounted, onUnmounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { getAuthSettings, getCaptcha } from '@/services/user'
 import SiteLogoMedia from '@/components/brand/SiteLogoMedia.vue'
 import { message, ConfigProvider, theme } from 'ant-design-vue'
 import { UserOutlined, LockOutlined, RocketOutlined, BarChartOutlined, LinkOutlined, SafetyOutlined } from '@ant-design/icons-vue'
 
 const form = reactive({
   username: '',
-  password: ''
+  password: '',
+  captcha_code: ''
 })
 
 const rememberMe = ref(false)
@@ -181,6 +198,31 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const bgCanvas = ref()
+
+const settings = reactive({
+  login_captcha_enabled: false
+})
+const captchaId = ref('')
+const captchaImage = ref('')
+
+const refreshCaptcha = async () => {
+  if (!settings.login_captcha_enabled) return
+  const res = await getCaptcha()
+  captchaId.value = res.data?.captcha_id || ''
+  const base64 = res.data?.image_base64 || ''
+  captchaImage.value = base64 ? `data:image/png;base64,${base64}` : ''
+}
+
+const loadSettings = async () => {
+  try {
+    const res = await getAuthSettings()
+    Object.assign(settings, res.data || {})
+  } catch (error) {
+    console.error('Failed to fetch auth settings:', error)
+  } finally {
+    refreshCaptcha()
+  }
+}
 
 const features = [
   { icon: RocketOutlined, text: 'VPS 生命周期管理' },
@@ -196,7 +238,12 @@ const stats = [
 ]
 
 const onSubmit = async () => {
-  const token = await auth.login(form)
+  const token = await auth.login({
+    username: form.username,
+    password: form.password,
+    captcha_id: captchaId.value,
+    captcha_code: form.captcha_code
+  })
   if (!token) {
     message.error('登录失败，请检查账号密码')
     return
@@ -284,6 +331,7 @@ const initCanvas = () => {
 
 onMounted(() => {
   initCanvas()
+  loadSettings()
 })
 
 onUnmounted(() => {
@@ -618,6 +666,29 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
+}
+
+.captcha {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.captcha-img {
+  flex: 0 0 120px;
+  height: 42px;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  color: rgba(241, 245, 249, 0.7);
+}
+
+.captcha-img img {
+  height: 100%;
 }
 
 .remember-checkbox :deep(.ant-checkbox-checked .ant-checkbox-inner) {

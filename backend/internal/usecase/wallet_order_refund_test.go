@@ -224,7 +224,8 @@ func TestWalletOrderService_RequestRefund(t *testing.T) {
 	vps := &fakeVPSRepo{inst: inst}
 	items := &fakeOrderItemRepo{item: item}
 	auto := &testutil.FakeAutomationClient{}
-	svc := usecase.NewWalletOrderService(orders, wallets, settings, vps, items, auto, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: auto}
+	svc := usecase.NewWalletOrderService(orders, wallets, settings, vps, items, autoResolver, nil)
 
 	if _, _, err := svc.RequestRefund(context.Background(), 2, inst.ID, "no"); err != usecase.ErrForbidden {
 		t.Fatalf("expected forbidden, got %v", err)

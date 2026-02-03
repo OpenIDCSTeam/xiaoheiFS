@@ -64,3 +64,17 @@ func (p *KycGRPCPlugin) GRPCServer(_ *plugin.GRPCBroker, s *grpc.Server) error {
 func (p *KycGRPCPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, c *grpc.ClientConn) (interface{}, error) {
 	return pluginv1.NewKycServiceClient(c), nil
 }
+
+type AutomationGRPCPlugin struct {
+	plugin.NetRPCUnsupportedPlugin
+	Impl pluginv1.AutomationServiceServer
+}
+
+func (p *AutomationGRPCPlugin) GRPCServer(_ *plugin.GRPCBroker, s *grpc.Server) error {
+	pluginv1.RegisterAutomationServiceServer(s, p.Impl)
+	return nil
+}
+
+func (p *AutomationGRPCPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, c *grpc.ClientConn) (interface{}, error) {
+	return pluginv1.NewAutomationServiceClient(c), nil
+}

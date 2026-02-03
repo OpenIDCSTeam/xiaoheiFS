@@ -1,0 +1,17 @@
+{
+  "title": "Lightboat Automation",
+  "type": "object",
+  "properties": {
+    "base_url": {
+      "type": "string",
+      "title": "Base URL",
+      "description": "e.g. https://panel.example.com/index.php/api/cloud"
+    },
+    "api_key": { "type": "string", "title": "API Key", "format": "password" },
+    "timeout_sec": { "type": "integer", "title": "Timeout (sec)", "default": 12, "minimum": 1, "maximum": 60 },
+    "retry": { "type": "integer", "title": "Retry", "default": 1, "minimum": 0, "maximum": 5 },
+    "dry_run": { "type": "boolean", "title": "Dry Run", "default": false }
+  },
+  "required": ["base_url", "api_key"]
+}
+

@@ -52,6 +52,20 @@ type FakeAutomationClient struct {
 	PortList     []usecase.AutomationPortMapping
 }
 
+type FakeAutomationResolver struct {
+	Client usecase.AutomationClient
+	Err    error
+}
+
+func (r *FakeAutomationResolver) ClientForGoodsType(ctx context.Context, goodsTypeID int64) (usecase.AutomationClient, error) {
+	_ = ctx
+	_ = goodsTypeID
+	if r.Err != nil {
+		return nil, r.Err
+	}
+	return r.Client, nil
+}
+
 func (f *FakeAutomationClient) CreateHost(ctx context.Context, req usecase.AutomationCreateHostRequest) (usecase.AutomationCreateHostResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

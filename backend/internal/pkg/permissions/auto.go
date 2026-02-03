@@ -42,6 +42,7 @@ var moduleMapping = map[string]moduleMeta{
 	"cms_block":        {Display: "页面模块", SortOrder: 23},
 	"upload":           {Display: "资源上传", SortOrder: 24},
 	"tickets":          {Display: "工单管理", SortOrder: 25},
+	"goods_type":       {Display: "Goods Type", SortOrder: 6},
 	"plugin":           {Display: "Plugin", SortOrder: 26},
 }
 
@@ -226,6 +227,8 @@ func moduleFromSegments(segments []string) string {
 		return "cms"
 	case "plan-groups":
 		return "plan_group"
+	case "goods-types":
+		return "goods_type"
 	case "lines":
 		return "line"
 	case "system-images":
@@ -343,14 +346,24 @@ func actionFromSegments(method string, segments []string) (string, bool) {
 			return "create", true
 		}
 		if len(segments) >= 3 && strings.HasPrefix(segments[1], ":") && strings.HasPrefix(segments[2], ":") {
+			// /plugins/:category/:plugin_id/import
+			if len(segments) == 4 && segments[3] == "import" && method == "POST" {
+				return "create", true
+			}
+			// /plugins/:category/:plugin_id/instances
+			if len(segments) == 4 && segments[3] == "instances" && method == "POST" {
+				return "create", true
+			}
+			// /plugins/:category/:plugin_id/files
+			if len(segments) == 4 && segments[3] == "files" && method == "DELETE" {
+				return "delete", true
+			}
+			// legacy default-instance endpoints
 			if len(segments) == 3 && method == "DELETE" {
 				return "delete", true
 			}
 			if len(segments) == 4 && (segments[3] == "enable" || segments[3] == "disable") && method == "POST" {
 				return "update", true
-			}
-			if len(segments) == 4 && segments[3] == "import" && method == "POST" {
-				return "create", true
 			}
 			if len(segments) >= 4 && segments[3] == "config" {
 				switch method {
@@ -358,6 +371,24 @@ func actionFromSegments(method string, segments []string) (string, bool) {
 					return "view", true
 				case "PUT", "PATCH":
 					return "update", true
+				}
+			}
+
+			// /plugins/:category/:plugin_id/:instance_id/...
+			if len(segments) >= 4 && strings.HasPrefix(segments[3], ":") {
+				if len(segments) == 4 && method == "DELETE" {
+					return "delete", true
+				}
+				if len(segments) == 5 && (segments[4] == "enable" || segments[4] == "disable") && method == "POST" {
+					return "update", true
+				}
+				if len(segments) >= 5 && segments[4] == "config" {
+					switch method {
+					case "GET":
+						return "view", true
+					case "PUT", "PATCH":
+						return "update", true
+					}
 				}
 			}
 		}

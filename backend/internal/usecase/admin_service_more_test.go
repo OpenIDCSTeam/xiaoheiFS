@@ -159,6 +159,12 @@ type usecaseTestAutomation struct {
 	hostID int64
 }
 
+func (f *usecaseTestAutomation) ClientForGoodsType(ctx context.Context, goodsTypeID int64) (usecase.AutomationClient, error) {
+	_ = ctx
+	_ = goodsTypeID
+	return f, nil
+}
+
 func (f *usecaseTestAutomation) CreateHost(ctx context.Context, req usecase.AutomationCreateHostRequest) (usecase.AutomationCreateHostResult, error) {
 	if f.hostID == 0 {
 		f.hostID = 1001

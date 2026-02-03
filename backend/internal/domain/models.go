@@ -124,15 +124,40 @@ type Captcha struct {
 	CreatedAt time.Time
 }
 
+type VerificationCode struct {
+	ID        int64
+	Channel   string
+	Receiver  string
+	Purpose   string
+	CodeHash  string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
 type Region struct {
-	ID     int64
-	Code   string
-	Name   string
-	Active bool
+	ID          int64
+	GoodsTypeID int64
+	Code        string
+	Name        string
+	Active      bool
+}
+
+type GoodsType struct {
+	ID                   int64
+	Code                 string
+	Name                 string
+	Active               bool
+	SortOrder            int
+	AutomationCategory   string
+	AutomationPluginID   string
+	AutomationInstanceID string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type PlanGroup struct {
 	ID                int64
+	GoodsTypeID       int64
 	RegionID          int64
 	Name              string
 	LineID            int64
@@ -160,6 +185,7 @@ type PlanGroup struct {
 
 type Package struct {
 	ID                int64
+	GoodsTypeID       int64
 	PlanGroupID       int64
 	ProductID         int64
 	Name              string
@@ -223,6 +249,7 @@ type OrderItem struct {
 	Qty                  int
 	Amount               int64
 	Status               OrderItemStatus
+	GoodsTypeID          int64
 	AutomationInstanceID string
 	Action               string
 	DurationMonths       int
@@ -235,6 +262,7 @@ type VPSInstance struct {
 	UserID               int64
 	OrderItemID          int64
 	AutomationInstanceID string
+	GoodsTypeID          int64
 	Name                 string
 	Region               string
 	RegionID             int64

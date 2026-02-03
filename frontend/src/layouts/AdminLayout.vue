@@ -276,7 +276,8 @@ const menuTree = [
       }
     ]
   },
-  { key: "/admin/profile", label: "个人资料", icon: UserOutlined }
+  { key: "/admin/profile", label: "个人资料", icon: UserOutlined },
+  { key: "/admin/settings/auth", label: "注册与登录", icon: SafetyCertificateOutlined, requireAny: ["settings.view"] }
 ];
 
 const filterMenuTree = (nodes) => {

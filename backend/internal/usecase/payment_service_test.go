@@ -127,6 +127,71 @@ func TestPaymentService_HandleNotifyIdempotent(t *testing.T) {
 	}
 }
 
+func TestPaymentService_HandleNotify_FallbackByOrderNo(t *testing.T) {
+	_, repo := testutil.NewTestDB(t, false)
+	user := testutil.CreateUser(t, repo, "notify2", "notify2@example.com", "pass")
+	order := domain.Order{
+		UserID:      user.ID,
+		OrderNo:     "ORD-NOTIFY-2",
+		Status:      domain.OrderStatusPendingPayment,
+		TotalAmount: 1000,
+		Currency:    "CNY",
+	}
+	if err := repo.CreateOrder(context.Background(), &order); err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	if err := repo.CreateOrderItems(context.Background(), []domain.OrderItem{{
+		OrderID:  order.ID,
+		Amount:   1000,
+		Status:   domain.OrderItemStatusPendingPayment,
+		Action:   "create",
+		SpecJSON: "{}",
+	}}); err != nil {
+		t.Fatalf("create items: %v", err)
+	}
+	payment := domain.OrderPayment{
+		OrderID:  order.ID,
+		UserID:   user.ID,
+		Method:   "ezpay.wxpay",
+		Amount:   1000,
+		Currency: "CNY",
+		TradeNo:  "TN-LOCAL",
+		Status:   domain.PaymentStatusPendingPayment,
+	}
+	if err := repo.CreatePayment(context.Background(), &payment); err != nil {
+		t.Fatalf("create payment: %v", err)
+	}
+
+	reg := testutil.NewFakePaymentRegistry()
+	reg.RegisterProvider(&testutil.FakePaymentProvider{
+		KeyVal:  "ezpay.wxpay",
+		NameVal: "EZPay / wxpay",
+		VerifyRes: usecase.PaymentNotifyResult{
+			OrderNo: "ORD-NOTIFY-2",
+			TradeNo: "TN-PROV",
+			Paid:    true,
+			Amount:  1000,
+		},
+	}, true, "")
+	approver := &fakeApprover{}
+	svc := usecase.NewPaymentService(repo, repo, repo, reg, repo, approver, nil)
+
+	raw := usecase.RawHTTPRequest{Method: "GET", Path: "/payments/notify/ezpay.wxpay", RawQuery: "out_trade_no=ORD-NOTIFY-2&trade_no=TN-PROV"}
+	if _, err := svc.HandleNotify(context.Background(), "ezpay.wxpay", raw); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	updated, err := repo.GetPaymentByTradeNo(context.Background(), "TN-PROV")
+	if err != nil {
+		t.Fatalf("get payment by new trade_no: %v", err)
+	}
+	if updated.Status != domain.PaymentStatusApproved {
+		t.Fatalf("expected approved")
+	}
+	if updated.Method != "ezpay.wxpay" {
+		t.Fatalf("expected method preserved")
+	}
+}
+
 func TestPaymentService_CustomProviderDisabled(t *testing.T) {
 	_, repo := testutil.NewTestDB(t, false)
 	user := testutil.CreateUser(t, repo, "custom", "custom@example.com", "pass")

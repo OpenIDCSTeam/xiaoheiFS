@@ -21,6 +21,67 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type AutomationFeature int32
+
+const (
+	AutomationFeature_AUTOMATION_FEATURE_UNSPECIFIED  AutomationFeature = 0
+	AutomationFeature_AUTOMATION_FEATURE_CATALOG_SYNC AutomationFeature = 1
+	AutomationFeature_AUTOMATION_FEATURE_LIFECYCLE    AutomationFeature = 2
+	AutomationFeature_AUTOMATION_FEATURE_PORT_MAPPING AutomationFeature = 3
+	AutomationFeature_AUTOMATION_FEATURE_BACKUP       AutomationFeature = 4
+	AutomationFeature_AUTOMATION_FEATURE_SNAPSHOT     AutomationFeature = 5
+	AutomationFeature_AUTOMATION_FEATURE_FIREWALL     AutomationFeature = 6
+)
+
+// Enum value maps for AutomationFeature.
+var (
+	AutomationFeature_name = map[int32]string{
+		0: "AUTOMATION_FEATURE_UNSPECIFIED",
+		1: "AUTOMATION_FEATURE_CATALOG_SYNC",
+		2: "AUTOMATION_FEATURE_LIFECYCLE",
+		3: "AUTOMATION_FEATURE_PORT_MAPPING",
+		4: "AUTOMATION_FEATURE_BACKUP",
+		5: "AUTOMATION_FEATURE_SNAPSHOT",
+		6: "AUTOMATION_FEATURE_FIREWALL",
+	}
+	AutomationFeature_value = map[string]int32{
+		"AUTOMATION_FEATURE_UNSPECIFIED":  0,
+		"AUTOMATION_FEATURE_CATALOG_SYNC": 1,
+		"AUTOMATION_FEATURE_LIFECYCLE":    2,
+		"AUTOMATION_FEATURE_PORT_MAPPING": 3,
+		"AUTOMATION_FEATURE_BACKUP":       4,
+		"AUTOMATION_FEATURE_SNAPSHOT":     5,
+		"AUTOMATION_FEATURE_FIREWALL":     6,
+	}
+)
+
+func (x AutomationFeature) Enum() *AutomationFeature {
+	p := new(AutomationFeature)
+	*p = x
+	return p
+}
+
+func (x AutomationFeature) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AutomationFeature) Descriptor() protoreflect.EnumDescriptor {
+	return file_plugin_v1_manifest_proto_enumTypes[0].Descriptor()
+}
+
+func (AutomationFeature) Type() protoreflect.EnumType {
+	return &file_plugin_v1_manifest_proto_enumTypes[0]
+}
+
+func (x AutomationFeature) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AutomationFeature.Descriptor instead.
+func (AutomationFeature) EnumDescriptor() ([]byte, []int) {
+	return file_plugin_v1_manifest_proto_rawDescGZIP(), []int{0}
+}
+
 type SmsCapability struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Send          bool                   `protobuf:"varint,1,opt,name=send,proto3" json:"send,omitempty"`
@@ -161,6 +222,61 @@ func (x *KycCapability) GetQueryResult() bool {
 	return false
 }
 
+type AutomationCapability struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Supported features. Missing features are treated as "not supported".
+	Features []AutomationFeature `protobuf:"varint,1,rep,packed,name=features,proto3,enum=plugin.v1.AutomationFeature" json:"features,omitempty"`
+	// Optional reasons for why a feature is not supported.
+	// Key is the numeric value of AutomationFeature.
+	NotSupportedReasons map[int32]string `protobuf:"bytes,2,rep,name=not_supported_reasons,json=notSupportedReasons,proto3" json:"not_supported_reasons,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *AutomationCapability) Reset() {
+	*x = AutomationCapability{}
+	mi := &file_plugin_v1_manifest_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AutomationCapability) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AutomationCapability) ProtoMessage() {}
+
+func (x *AutomationCapability) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_v1_manifest_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AutomationCapability.ProtoReflect.Descriptor instead.
+func (*AutomationCapability) Descriptor() ([]byte, []int) {
+	return file_plugin_v1_manifest_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AutomationCapability) GetFeatures() []AutomationFeature {
+	if x != nil {
+		return x.Features
+	}
+	return nil
+}
+
+func (x *AutomationCapability) GetNotSupportedReasons() map[int32]string {
+	if x != nil {
+		return x.NotSupportedReasons
+	}
+	return nil
+}
+
 type Manifest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
@@ -170,13 +286,14 @@ type Manifest struct {
 	Sms           *SmsCapability         `protobuf:"bytes,10,opt,name=sms,proto3,oneof" json:"sms,omitempty"`
 	Payment       *PaymentCapability     `protobuf:"bytes,11,opt,name=payment,proto3,oneof" json:"payment,omitempty"`
 	Kyc           *KycCapability         `protobuf:"bytes,12,opt,name=kyc,proto3,oneof" json:"kyc,omitempty"`
+	Automation    *AutomationCapability  `protobuf:"bytes,13,opt,name=automation,proto3,oneof" json:"automation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Manifest) Reset() {
 	*x = Manifest{}
-	mi := &file_plugin_v1_manifest_proto_msgTypes[3]
+	mi := &file_plugin_v1_manifest_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -188,7 +305,7 @@ func (x *Manifest) String() string {
 func (*Manifest) ProtoMessage() {}
 
 func (x *Manifest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_v1_manifest_proto_msgTypes[3]
+	mi := &file_plugin_v1_manifest_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -201,7 +318,7 @@ func (x *Manifest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Manifest.ProtoReflect.Descriptor instead.
 func (*Manifest) Descriptor() ([]byte, []int) {
-	return file_plugin_v1_manifest_proto_rawDescGZIP(), []int{3}
+	return file_plugin_v1_manifest_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Manifest) GetPluginId() string {
@@ -253,6 +370,13 @@ func (x *Manifest) GetKyc() *KycCapability {
 	return nil
 }
 
+func (x *Manifest) GetAutomation() *AutomationCapability {
+	if x != nil {
+		return x.Automation
+	}
+	return nil
+}
+
 var File_plugin_v1_manifest_proto protoreflect.FileDescriptor
 
 const file_plugin_v1_manifest_proto_rawDesc = "" +
@@ -264,7 +388,13 @@ const file_plugin_v1_manifest_proto_rawDesc = "" +
 	"\amethods\x18\x01 \x03(\tR\amethods\"H\n" +
 	"\rKycCapability\x12\x14\n" +
 	"\x05start\x18\x01 \x01(\bR\x05start\x12!\n" +
-	"\fquery_result\x18\x02 \x01(\bR\vqueryResult\"\xb2\x02\n" +
+	"\fquery_result\x18\x02 \x01(\bR\vqueryResult\"\x86\x02\n" +
+	"\x14AutomationCapability\x128\n" +
+	"\bfeatures\x18\x01 \x03(\x0e2\x1c.plugin.v1.AutomationFeatureR\bfeatures\x12l\n" +
+	"\x15not_supported_reasons\x18\x02 \x03(\v28.plugin.v1.AutomationCapability.NotSupportedReasonsEntryR\x13notSupportedReasons\x1aF\n" +
+	"\x18NotSupportedReasonsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\x05R\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x87\x03\n" +
 	"\bManifest\x12\x1b\n" +
 	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -273,11 +403,23 @@ const file_plugin_v1_manifest_proto_rawDesc = "" +
 	"\x03sms\x18\n" +
 	" \x01(\v2\x18.plugin.v1.SmsCapabilityH\x00R\x03sms\x88\x01\x01\x12;\n" +
 	"\apayment\x18\v \x01(\v2\x1c.plugin.v1.PaymentCapabilityH\x01R\apayment\x88\x01\x01\x12/\n" +
-	"\x03kyc\x18\f \x01(\v2\x18.plugin.v1.KycCapabilityH\x02R\x03kyc\x88\x01\x01B\x06\n" +
+	"\x03kyc\x18\f \x01(\v2\x18.plugin.v1.KycCapabilityH\x02R\x03kyc\x88\x01\x01\x12D\n" +
+	"\n" +
+	"automation\x18\r \x01(\v2\x1f.plugin.v1.AutomationCapabilityH\x03R\n" +
+	"automation\x88\x01\x01B\x06\n" +
 	"\x04_smsB\n" +
 	"\n" +
 	"\b_paymentB\x06\n" +
-	"\x04_kycB Z\x1exiaoheiplay/plugin/v1;pluginv1b\x06proto3"
+	"\x04_kycB\r\n" +
+	"\v_automation*\x84\x02\n" +
+	"\x11AutomationFeature\x12\"\n" +
+	"\x1eAUTOMATION_FEATURE_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fAUTOMATION_FEATURE_CATALOG_SYNC\x10\x01\x12 \n" +
+	"\x1cAUTOMATION_FEATURE_LIFECYCLE\x10\x02\x12#\n" +
+	"\x1fAUTOMATION_FEATURE_PORT_MAPPING\x10\x03\x12\x1d\n" +
+	"\x19AUTOMATION_FEATURE_BACKUP\x10\x04\x12\x1f\n" +
+	"\x1bAUTOMATION_FEATURE_SNAPSHOT\x10\x05\x12\x1f\n" +
+	"\x1bAUTOMATION_FEATURE_FIREWALL\x10\x06B Z\x1exiaoheiplay/plugin/v1;pluginv1b\x06proto3"
 
 var (
 	file_plugin_v1_manifest_proto_rawDescOnce sync.Once
@@ -291,22 +433,29 @@ func file_plugin_v1_manifest_proto_rawDescGZIP() []byte {
 	return file_plugin_v1_manifest_proto_rawDescData
 }
 
-var file_plugin_v1_manifest_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_plugin_v1_manifest_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_plugin_v1_manifest_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_plugin_v1_manifest_proto_goTypes = []any{
-	(*SmsCapability)(nil),     // 0: plugin.v1.SmsCapability
-	(*PaymentCapability)(nil), // 1: plugin.v1.PaymentCapability
-	(*KycCapability)(nil),     // 2: plugin.v1.KycCapability
-	(*Manifest)(nil),          // 3: plugin.v1.Manifest
+	(AutomationFeature)(0),       // 0: plugin.v1.AutomationFeature
+	(*SmsCapability)(nil),        // 1: plugin.v1.SmsCapability
+	(*PaymentCapability)(nil),    // 2: plugin.v1.PaymentCapability
+	(*KycCapability)(nil),        // 3: plugin.v1.KycCapability
+	(*AutomationCapability)(nil), // 4: plugin.v1.AutomationCapability
+	(*Manifest)(nil),             // 5: plugin.v1.Manifest
+	nil,                          // 6: plugin.v1.AutomationCapability.NotSupportedReasonsEntry
 }
 var file_plugin_v1_manifest_proto_depIdxs = []int32{
-	0, // 0: plugin.v1.Manifest.sms:type_name -> plugin.v1.SmsCapability
-	1, // 1: plugin.v1.Manifest.payment:type_name -> plugin.v1.PaymentCapability
-	2, // 2: plugin.v1.Manifest.kyc:type_name -> plugin.v1.KycCapability
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // 0: plugin.v1.AutomationCapability.features:type_name -> plugin.v1.AutomationFeature
+	6, // 1: plugin.v1.AutomationCapability.not_supported_reasons:type_name -> plugin.v1.AutomationCapability.NotSupportedReasonsEntry
+	1, // 2: plugin.v1.Manifest.sms:type_name -> plugin.v1.SmsCapability
+	2, // 3: plugin.v1.Manifest.payment:type_name -> plugin.v1.PaymentCapability
+	3, // 4: plugin.v1.Manifest.kyc:type_name -> plugin.v1.KycCapability
+	4, // 5: plugin.v1.Manifest.automation:type_name -> plugin.v1.AutomationCapability
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_plugin_v1_manifest_proto_init() }
@@ -314,19 +463,20 @@ func file_plugin_v1_manifest_proto_init() {
 	if File_plugin_v1_manifest_proto != nil {
 		return
 	}
-	file_plugin_v1_manifest_proto_msgTypes[3].OneofWrappers = []any{}
+	file_plugin_v1_manifest_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plugin_v1_manifest_proto_rawDesc), len(file_plugin_v1_manifest_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   4,
+			NumEnums:      1,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_plugin_v1_manifest_proto_goTypes,
 		DependencyIndexes: file_plugin_v1_manifest_proto_depIdxs,
+		EnumInfos:         file_plugin_v1_manifest_proto_enumTypes,
 		MessageInfos:      file_plugin_v1_manifest_proto_msgTypes,
 	}.Build()
 	File_plugin_v1_manifest_proto = out.File

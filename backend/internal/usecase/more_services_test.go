@@ -122,7 +122,7 @@ func TestAuthCartVPSAndStatus(t *testing.T) {
 	if err := repo.CreateUser(ctx, &user); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	authSvc := usecase.NewAuthService(repo, repo)
+	authSvc := usecase.NewAuthService(repo, repo, repo)
 	updated, err := authSvc.UpdateProfile(ctx, user.ID, usecase.UpdateProfileInput{Username: "profileu2", Email: "profileu2@example.com", QQ: "123"})
 	if err != nil {
 		t.Fatalf("update profile: %v", err)

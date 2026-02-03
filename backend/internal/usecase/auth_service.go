@@ -17,16 +17,18 @@ import (
 type AuthService struct {
 	users    UserRepository
 	captchas CaptchaRepository
+	verify   VerificationCodeRepository
 }
 
 type RegisterInput struct {
-	Username    string
-	Email       string
-	QQ          string
-	Phone       string
-	Password    string
-	CaptchaID   string
-	CaptchaCode string
+	Username        string
+	Email           string
+	QQ              string
+	Phone           string
+	Password        string
+	CaptchaID       string
+	CaptchaCode     string
+	CaptchaRequired bool
 }
 
 type UpdateProfileInput struct {
@@ -39,8 +41,8 @@ type UpdateProfileInput struct {
 	Password string
 }
 
-func NewAuthService(users UserRepository, captchas CaptchaRepository) *AuthService {
-	return &AuthService{users: users, captchas: captchas}
+func NewAuthService(users UserRepository, captchas CaptchaRepository, verify VerificationCodeRepository) *AuthService {
+	return &AuthService{users: users, captchas: captchas, verify: verify}
 }
 
 func (s *AuthService) CreateCaptcha(ctx context.Context, ttl time.Duration) (domain.Captcha, string, error) {
@@ -62,8 +64,10 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (domain.Us
 	if in.Username == "" || in.Password == "" || in.Email == "" {
 		return domain.User{}, ErrInvalidInput
 	}
-	if err := s.verifyCaptcha(ctx, in.CaptchaID, in.CaptchaCode); err != nil {
-		return domain.User{}, err
+	if in.CaptchaID != "" || in.CaptchaCode != "" || in.CaptchaRequired {
+		if err := s.verifyCaptcha(ctx, in.CaptchaID, in.CaptchaCode); err != nil {
+			return domain.User{}, err
+		}
 	}
 	if _, err := s.users.GetUserByUsernameOrEmail(ctx, in.Username); err == nil {
 		return domain.User{}, ErrConflict
@@ -187,6 +191,54 @@ func (s *AuthService) verifyCaptcha(ctx context.Context, id, code string) error 
 		return ErrCaptchaFailed
 	}
 	_ = s.captchas.DeleteCaptcha(ctx, id)
+	return nil
+}
+
+func (s *AuthService) VerifyCaptcha(ctx context.Context, id, code string) error {
+	return s.verifyCaptcha(ctx, id, code)
+}
+
+func (s *AuthService) CreateVerificationCode(ctx context.Context, channel, receiver, purpose string, ttl time.Duration) (string, error) {
+	if strings.TrimSpace(channel) == "" || strings.TrimSpace(receiver) == "" || strings.TrimSpace(purpose) == "" {
+		return "", ErrInvalidInput
+	}
+	if s.verify == nil {
+		return "", ErrNotSupported
+	}
+	code := randomCode(6)
+	item := domain.VerificationCode{
+		Channel:   strings.TrimSpace(channel),
+		Receiver:  strings.TrimSpace(receiver),
+		Purpose:   strings.TrimSpace(purpose),
+		CodeHash:  hashText(strings.ToUpper(code)),
+		ExpiresAt: time.Now().Add(ttl),
+		CreatedAt: time.Now(),
+	}
+	if err := s.verify.CreateVerificationCode(ctx, item); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+func (s *AuthService) VerifyVerificationCode(ctx context.Context, channel, receiver, purpose, code string) error {
+	if strings.TrimSpace(channel) == "" || strings.TrimSpace(receiver) == "" || strings.TrimSpace(purpose) == "" || strings.TrimSpace(code) == "" {
+		return ErrInvalidInput
+	}
+	if s.verify == nil {
+		return ErrNotSupported
+	}
+	item, err := s.verify.GetLatestVerificationCode(ctx, strings.TrimSpace(channel), strings.TrimSpace(receiver), strings.TrimSpace(purpose))
+	if err != nil {
+		return ErrCaptchaFailed
+	}
+	if time.Now().After(item.ExpiresAt) {
+		_ = s.verify.DeleteVerificationCodes(ctx, item.Channel, item.Receiver, item.Purpose)
+		return ErrCaptchaFailed
+	}
+	if item.CodeHash != hashText(strings.ToUpper(code)) {
+		return ErrCaptchaFailed
+	}
+	_ = s.verify.DeleteVerificationCodes(ctx, item.Channel, item.Receiver, item.Purpose)
 	return nil
 }
 

@@ -1,8 +1,8 @@
 {
   "plugin_id": "aliyun_kyc",
-  "name": "Aliyun eKYC (Mock)",
-  "version": "0.1.0",
-  "description": "Mock KYC plugin. Replace with real Aliyun eKYC calls.",
+  "name": "Aliyun CloudAuth (eKYC/Real-Name)",
+  "version": "1.0.0",
+  "description": "Aliyun CloudAuth InitSmartVerify/DescribeSmartVerify flow.",
   "binaries": {
     "windows_amd64": "bin/windows_amd64/plugin.exe",
     "linux_amd64": "bin/linux_amd64/plugin",

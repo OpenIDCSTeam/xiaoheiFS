@@ -133,7 +133,8 @@ func TestOrderService_RenewAndResizeFlow(t *testing.T) {
 	}
 
 	fakeAuto := &testutil.FakeAutomationClient{}
-	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, fakeAuto, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, autoResolver, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
 	if err := svc.ApproveOrder(context.Background(), 1, renewOrder.ID); err != nil {
 		t.Fatalf("approve renew: %v", err)
 	}

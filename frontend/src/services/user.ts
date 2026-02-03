@@ -2,6 +2,7 @@ import { http, withApiKey } from "./http";
 import type {
   ApiList,
   AuthResponse,
+  AuthSettings,
   CaptchaResponse,
   CartItem,
   CartItemRequest,
@@ -31,10 +32,14 @@ import type {
   UnreadCountResponse,
   RealNameVerification,
   CMSBlock,
-  CMSPost
+  CMSPost,
+  GoodsType
 } from "./types";
 
 export const getCaptcha = () => http.get<CaptchaResponse>("/api/v1/captcha");
+export const getAuthSettings = () => http.get<AuthSettings>("/api/v1/auth/settings");
+export const requestRegisterCode = (payload: { email?: string; phone?: string; captcha_id?: string; captcha_code?: string }) =>
+  http.post("/api/v1/auth/register/code", payload);
 export const getInstallStatus = () => http.get<{ installed: boolean }>("/api/v1/install/status");
 export const checkInstallDB = (payload: Record<string, unknown>) =>
   http.post<{ ok: boolean; error?: string }>("/api/v1/install/db/check", payload);
@@ -45,10 +50,11 @@ export const getMe = () => http.get<User>("/api/v1/me");
 export const updateMe = (payload: Record<string, unknown>) => http.patch<User>("/api/v1/me", payload);
 
 export const getDashboard = () => http.get<UserDashboard>("/api/v1/dashboard");
+export const listGoodsTypes = () => http.get<{ items: GoodsType[] }>("/api/v1/goods-types");
 export const getCatalog = () => http.get("/api/v1/catalog");
-export const listPlanGroups = (params?: { region_id?: number }) =>
+export const listPlanGroups = (params?: { region_id?: number; goods_type_id?: number }) =>
   http.get<ApiList<Line>>("/api/v1/plan-groups", { params });
-export const listPackages = (params?: { plan_group_id?: number }) =>
+export const listPackages = (params?: { plan_group_id?: number; goods_type_id?: number }) =>
   http.get<ApiList<Package>>("/api/v1/packages", { params });
 export const listBillingCycles = () => http.get<ApiList<BillingCycle>>("/api/v1/billing-cycles");
 export const listSystemImages = (params?: { line_id?: number; plan_group_id?: number }) =>

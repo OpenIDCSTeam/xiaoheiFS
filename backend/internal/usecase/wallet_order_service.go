@@ -28,11 +28,11 @@ type WalletOrderService struct {
 	settings   SettingsRepository
 	vps        VPSRepository
 	orderItems OrderItemRepository
-	automation AutomationClient
+	automation AutomationClientResolver
 	audit      AuditRepository
 }
 
-func NewWalletOrderService(orders WalletOrderRepository, wallets WalletRepository, settings SettingsRepository, vps VPSRepository, orderItems OrderItemRepository, automation AutomationClient, audit AuditRepository) *WalletOrderService {
+func NewWalletOrderService(orders WalletOrderRepository, wallets WalletRepository, settings SettingsRepository, vps VPSRepository, orderItems OrderItemRepository, automation AutomationClientResolver, audit AuditRepository) *WalletOrderService {
 	return &WalletOrderService{
 		orders:     orders,
 		wallets:    wallets,
@@ -374,7 +374,11 @@ func (s *WalletOrderService) deleteVPS(ctx context.Context, metaJSON string) err
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	if err := s.automation.DeleteHost(ctx, hostID); err != nil {
+	cli, err := s.automation.ClientForGoodsType(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	if err := cli.DeleteHost(ctx, hostID); err != nil {
 		return err
 	}
 	_ = s.vps.UpdateInstanceStatus(ctx, inst.ID, domain.VPSStatusUnknown, inst.AutomationState)

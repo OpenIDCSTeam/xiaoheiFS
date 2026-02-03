@@ -5,9 +5,44 @@
         <div class="page-title">售卖配置</div>
         <div class="subtle">地区、线路、套餐与计费策略维护</div>
       </div>
+      <div class="page-header-actions" style="justify-content: flex-end">
+        <a-space>
+          <a-select
+            v-model:value="goodsTypeId"
+            :options="goodsTypeOptions"
+            placeholder="选择商品类型"
+            style="width: 260px"
+            allow-clear
+          />
+          <a-button :disabled="!goodsTypeId" @click="syncCurrentGoodsType">同步当前类型（merge）</a-button>
+        </a-space>
+      </div>
     </div>
 
     <a-tabs>
+      <a-tab-pane key="goods-types" tab="商品类型">
+        <a-card class="card">
+          <div class="page-header-actions" style="justify-content: flex-end; margin-bottom: 12px">
+            <a-space>
+              <a-button type="primary" @click="openGoodsType()">新增商品类型</a-button>
+            </a-space>
+          </div>
+          <a-table :columns="goodsTypeColumns" :data-source="goodsTypes" row-key="id" :pagination="false">
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'active'">
+                <a-tag :color="record.active ? 'green' : 'red'">{{ record.active ? '启用' : '停用' }}</a-tag>
+              </template>
+              <template v-else-if="column.key === 'action'">
+                <a-space>
+                  <a-button size="small" @click="openGoodsType(record)">编辑</a-button>
+                  <a-button size="small" @click="syncGoodsType(record)">同步</a-button>
+                  <a-button size="small" danger @click="removeGoodsType(record)">删除</a-button>
+                </a-space>
+              </template>
+            </template>
+          </a-table>
+        </a-card>
+      </a-tab-pane>
       <a-tab-pane key="regions" tab="地区">
         <a-card class="card">
           <div class="page-header-actions" style="justify-content: flex-end; margin-bottom: 12px">
@@ -198,6 +233,17 @@
         </a-card>
       </a-tab-pane>
     </a-tabs>
+
+    <a-modal v-model:open="goodsTypeOpen" title="商品类型" @ok="submitGoodsType">
+      <a-form layout="vertical">
+        <a-form-item label="名称"><a-input v-model:value="goodsTypeForm.name" /></a-form-item>
+        <a-form-item label="代码"><a-input v-model:value="goodsTypeForm.code" /></a-form-item>
+        <a-form-item label="排序"><a-input-number v-model:value="goodsTypeForm.sort_order" :min="0" style="width: 100%" /></a-form-item>
+        <a-form-item label="automation_plugin_id"><a-input v-model:value="goodsTypeForm.automation_plugin_id" /></a-form-item>
+        <a-form-item label="automation_instance_id"><a-input v-model:value="goodsTypeForm.automation_instance_id" /></a-form-item>
+        <a-form-item label="启用"><a-switch v-model:checked="goodsTypeForm.active" /></a-form-item>
+      </a-form>
+    </a-modal>
 
     <a-drawer v-model:open="regionOpen" title="地区" width="420" @close="resetRegion">
       <a-form layout="vertical">
@@ -431,8 +477,8 @@
   </div>
 </template>
 
-<script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { CodeOutlined, WindowsOutlined } from "@ant-design/icons-vue";
 import {
   listRegions,
@@ -461,7 +507,12 @@ import {
   createBillingCycle,
   updateBillingCycle,
   deleteBillingCycle,
-  bulkDeleteBillingCycles
+  bulkDeleteBillingCycles,
+  listGoodsTypes,
+  syncGoodsTypeAutomation,
+  createGoodsType,
+  updateGoodsType,
+  deleteGoodsType
 } from "@/services/admin";
 import { message, Modal } from "ant-design-vue";
 
@@ -470,6 +521,31 @@ const lines = ref([]);
 const packages = ref([]);
 const systemImages = ref([]);
 const billingCycles = ref([]);
+
+const goodsTypes = ref<any[]>([]);
+const goodsTypeId = ref<any>(null);
+const goodsTypeOptions = computed(() =>
+  (goodsTypes.value || [])
+    .filter((gt) => gt.active !== false)
+    .sort((a, b) => {
+      const sa = Number(a.sort_order ?? 0);
+      const sb = Number(b.sort_order ?? 0);
+      if (sa !== sb) return sa - sb;
+      return Number(a.id ?? 0) - Number(b.id ?? 0);
+    })
+    .map((gt) => ({ label: gt.name, value: gt.id }))
+);
+
+const goodsTypeColumns = [
+  { title: "ID", dataIndex: "id", key: "id" },
+  { title: "名称", dataIndex: "name", key: "name" },
+  { title: "代码", dataIndex: "code", key: "code" },
+  { title: "automation_plugin_id", dataIndex: "automation_plugin_id", key: "automation_plugin_id" },
+  { title: "automation_instance_id", dataIndex: "automation_instance_id", key: "automation_instance_id" },
+  { title: "排序", dataIndex: "sort_order", key: "sort_order" },
+  { title: "启用", dataIndex: "active", key: "active" },
+  { title: "操作", key: "action" }
+];
 
 const selectedRegionKeys = ref([]);
 const selectedLineKeys = ref([]);
@@ -527,7 +603,19 @@ const packageOpen = ref(false);
 const imageOpen = ref(false);
 const cycleOpen = ref(false);
 
-const regionForm = reactive({ id: null, name: "", code: "", active: true });
+const goodsTypeOpen = ref(false);
+
+const goodsTypeForm = reactive({
+  id: null,
+  code: "",
+  name: "",
+  active: true,
+  sort_order: 0,
+  automation_plugin_id: "",
+  automation_instance_id: ""
+});
+
+const regionForm = reactive({ id: null, goods_type_id: null, name: "", code: "", active: true });
 const lineForm = reactive({
   id: null,
   region_id: null,
@@ -695,21 +783,30 @@ const cycleColumns = [
 ];
 
 const load = async () => {
+  if (!goodsTypeId.value) {
+    regions.value = [];
+    lines.value = [];
+    packages.value = [];
+    return;
+  }
+  const goodsTypeParam = goodsTypeId.value ? { goods_type_id: goodsTypeId.value } : undefined;
   const [regionRes, lineRes, packageRes, imageRes, cycleRes] = await Promise.all([
-    listRegions(),
-    listLines(),
-    listPackages(),
+    listRegions(goodsTypeParam),
+    listLines(goodsTypeParam),
+    listPackages(goodsTypeParam),
     listSystemImages(),
     listBillingCycles()
   ]);
   regions.value = (regionRes.data?.items || []).map((row) => ({
     id: row.id ?? row.ID,
+    goods_type_id: row.goods_type_id ?? row.GoodsTypeID,
     name: row.name ?? row.Name,
     code: row.code ?? row.Code,
     active: row.active ?? row.Active
   }));
   lines.value = (lineRes.data?.items || []).map((row) => ({
     id: row.id ?? row.ID,
+    goods_type_id: row.goods_type_id ?? row.GoodsTypeID,
     region_id: row.region_id ?? row.RegionID,
     name: row.name ?? row.Name ?? row.line_name ?? row.LineName,
     line_id: row.line_id ?? row.LineID,
@@ -736,6 +833,7 @@ const load = async () => {
   packages.value = (packageRes.data?.items || []).map((row) => ({
     id: row.id ?? row.ID,
     name: row.name ?? row.Name,
+    goods_type_id: row.goods_type_id ?? row.GoodsTypeID,
     plan_group_id: row.plan_group_id ?? row.PlanGroupID,
     cores: row.cores ?? row.Cores,
     memory_gb: row.memory_gb ?? row.MemoryGB,
@@ -765,13 +863,79 @@ const load = async () => {
   }));
 };
 
+const loadGoodsTypeList = async () => {
+  const res = await listGoodsTypes();
+  goodsTypes.value = (res.data?.items || []).map((row: any) => ({
+    id: row.id ?? row.ID,
+    code: row.code ?? row.Code,
+    name: row.name ?? row.Name,
+    active: row.active ?? row.Active,
+    sort_order: row.sort_order ?? row.SortOrder,
+    automation_plugin_id: row.automation_plugin_id ?? row.AutomationPluginID,
+    automation_instance_id: row.automation_instance_id ?? row.AutomationInstanceID
+  }));
+  if (!goodsTypeId.value && goodsTypeOptions.value.length) {
+    goodsTypeId.value = goodsTypeOptions.value[0].value;
+  }
+};
+
+const syncCurrentGoodsType = async () => {
+  if (!goodsTypeId.value) return;
+  await syncGoodsTypeAutomation(goodsTypeId.value, "merge");
+  message.success("OK");
+  await load();
+};
+
+const openGoodsType = (record?: any) => {
+  if (record) Object.assign(goodsTypeForm, record);
+  else Object.assign(goodsTypeForm, { id: null, code: "", name: "", active: true, sort_order: 0, automation_plugin_id: "lightboat", automation_instance_id: "default" });
+  goodsTypeOpen.value = true;
+};
+
+const submitGoodsType = async () => {
+  const payload = { ...goodsTypeForm };
+  if (payload.id) {
+    await updateGoodsType(payload.id, payload);
+  } else {
+    await createGoodsType(payload);
+  }
+  message.success("OK");
+  goodsTypeOpen.value = false;
+  await loadGoodsTypeList();
+};
+
+const removeGoodsType = (record: any) => {
+  Modal.confirm({
+    title: "确认删除该商品类型?",
+    onOk: async () => {
+      await deleteGoodsType(record.id);
+      message.success("已删除");
+      await loadGoodsTypeList();
+    }
+  });
+};
+
+const syncGoodsType = async (record: any) => {
+  await syncGoodsTypeAutomation(record.id, "merge");
+  message.success("OK");
+  await load();
+};
+
+watch(goodsTypeId, async () => {
+  resetRegion();
+  await load();
+});
+
 const openRegion = (record) => {
   if (record) Object.assign(regionForm, record);
-  else Object.assign(regionForm, { id: null, name: "", code: "", active: true });
+  else Object.assign(regionForm, { id: null, goods_type_id: goodsTypeId.value || null, name: "", code: "", active: true });
   regionOpen.value = true;
 };
 
 const submitRegion = async () => {
+  if (!regionForm.goods_type_id) {
+    regionForm.goods_type_id = goodsTypeId.value || null;
+  }
   if (regionForm.id) {
     await updateRegion(regionForm.id, regionForm);
   } else {
@@ -782,7 +946,7 @@ const submitRegion = async () => {
   load();
 };
 
-const resetRegion = () => Object.assign(regionForm, { id: null, name: "", code: "", active: true });
+const resetRegion = () => Object.assign(regionForm, { id: null, goods_type_id: goodsTypeId.value || null, name: "", code: "", active: true });
 
 const removeRegion = (record) => {
   Modal.confirm({
@@ -1232,5 +1396,8 @@ const bulkRemoveCycles = () => {
   });
 };
 
-onMounted(load);
+onMounted(async () => {
+  await loadGoodsTypeList();
+  await load();
+});
 </script>

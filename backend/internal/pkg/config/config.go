@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -26,11 +27,15 @@ type Config struct {
 	JWTSecret          string
 	PluginMasterKey    string
 	PluginOfficialKeys []string
+	PluginsDir         string
 	APIBase            string
 	SiteName           string
 	SiteURL            string
 	AutomationBaseURL  string
 	AutomationAPIKey   string
+	// ConfigDir is the directory of the loaded config file (app.config.*).
+	// When PluginsDir/DBPath are relative, they are resolved from ConfigDir.
+	ConfigDir string
 }
 
 type fileConfig struct {
@@ -40,6 +45,7 @@ type fileConfig struct {
 	JWTSecret          string   `json:"jwt_secret" yaml:"jwt_secret"`
 	PluginMasterKey    string   `json:"plugin_master_key" yaml:"plugin_master_key"`
 	PluginOfficialKeys []string `json:"plugin_official_ed25519_pubkeys" yaml:"plugin_official_ed25519_pubkeys"`
+	PluginsDir         string   `json:"plugins_dir" yaml:"plugins_dir"`
 
 	DB struct {
 		Type string `json:"type" yaml:"type"`
@@ -59,14 +65,36 @@ func Load() Config {
 		JWTSecret:          "",
 		PluginMasterKey:    "",
 		PluginOfficialKeys: nil,
+		PluginsDir:         "plugins",
 		APIBase:            "http://localhost:8080",
 		SiteName:           "",
 		SiteURL:            "",
 		AutomationBaseURL:  "",
 		AutomationAPIKey:   "",
+		ConfigDir:          "",
 	}
 
-	applyFileConfig(&cfg, readLocalConfig())
+	fc, configPath := readLocalConfig()
+	applyFileConfig(&cfg, fc)
+	if strings.TrimSpace(configPath) != "" {
+		cfg.ConfigDir = filepath.Dir(configPath)
+	} else {
+		if abs, err := filepath.Abs("."); err == nil {
+			cfg.ConfigDir = abs
+		} else {
+			cfg.ConfigDir = "."
+		}
+	}
+
+	// Resolve relative paths from ConfigDir so running from different CWDs (e.g. air) is stable.
+	if strings.TrimSpace(cfg.ConfigDir) != "" {
+		if strings.TrimSpace(cfg.DBPath) != "" && !filepath.IsAbs(cfg.DBPath) {
+			cfg.DBPath = filepath.Join(cfg.ConfigDir, cfg.DBPath)
+		}
+		if strings.TrimSpace(cfg.PluginsDir) != "" && !filepath.IsAbs(cfg.PluginsDir) {
+			cfg.PluginsDir = filepath.Join(cfg.ConfigDir, cfg.PluginsDir)
+		}
+	}
 
 	if strings.TrimSpace(cfg.JWTSecret) == "" {
 		cfg.JWTSecret = generateSecret()
@@ -80,8 +108,15 @@ func Load() Config {
 	return cfg
 }
 
-func readLocalConfig() *fileConfig {
-	candidates := []string{localConfigYAML, localConfigYML, localConfigJSON}
+func readLocalConfig() (*fileConfig, string) {
+	candidates := []string{
+		localConfigYAML,
+		localConfigYML,
+		localConfigJSON,
+		filepath.Join("backend", localConfigYAML),
+		filepath.Join("backend", localConfigYML),
+		filepath.Join("backend", localConfigJSON),
+	}
 
 	for _, p := range candidates {
 		if strings.TrimSpace(p) == "" {
@@ -96,12 +131,18 @@ func readLocalConfig() *fileConfig {
 		switch {
 		case strings.HasSuffix(strings.ToLower(p), ".yaml") || strings.HasSuffix(strings.ToLower(p), ".yml"):
 			if yaml.Unmarshal(b, &fc) == nil {
-				return &fc
+				if abs, err := filepath.Abs(p); err == nil {
+					return &fc, abs
+				}
+				return &fc, p
 			}
 		case strings.HasSuffix(strings.ToLower(p), ".json"):
 			// Support both new nested JSON and the legacy flat JSON produced by older installers.
 			if json.Unmarshal(b, &fc) == nil {
-				return &fc
+				if abs, err := filepath.Abs(p); err == nil {
+					return &fc, abs
+				}
+				return &fc, p
 			}
 			var legacy struct {
 				DBType string `json:"db_type"`
@@ -112,19 +153,28 @@ func readLocalConfig() *fileConfig {
 				fc.DB.Type = legacy.DBType
 				fc.DB.Path = legacy.DBPath
 				fc.DB.DSN = legacy.DBDSN
-				return &fc
+				if abs, err := filepath.Abs(p); err == nil {
+					return &fc, abs
+				}
+				return &fc, p
 			}
 		default:
 			// If extension is unknown, try YAML then JSON.
 			if yaml.Unmarshal(b, &fc) == nil {
-				return &fc
+				if abs, err := filepath.Abs(p); err == nil {
+					return &fc, abs
+				}
+				return &fc, p
 			}
 			if json.Unmarshal(b, &fc) == nil {
-				return &fc
+				if abs, err := filepath.Abs(p); err == nil {
+					return &fc, abs
+				}
+				return &fc, p
 			}
 		}
 	}
-	return nil
+	return nil, ""
 }
 
 func applyFileConfig(cfg *Config, fc *fileConfig) {
@@ -145,6 +195,9 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	}
 	if len(fc.PluginOfficialKeys) > 0 {
 		cfg.PluginOfficialKeys = fc.PluginOfficialKeys
+	}
+	if strings.TrimSpace(fc.PluginsDir) != "" {
+		cfg.PluginsDir = strings.TrimSpace(fc.PluginsDir)
 	}
 	if strings.TrimSpace(fc.DB.Type) != "" {
 		cfg.DBType = strings.TrimSpace(fc.DB.Type)

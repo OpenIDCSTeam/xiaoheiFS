@@ -1,8 +1,8 @@
 {
   "plugin_id": "ezpay",
-  "name": "EZPay Aggregator (Demo)",
-  "version": "0.1.0",
-  "description": "Minimal demo payment plugin. YiPay works; WeChat/Alipay are stubs.",
+  "name": "EZPay",
+  "version": "1.0.0",
+  "description": "EZPay aggregate gateway (MD5). Fixed methods: alipay/wxpay/qqpay. Method switches are host-managed.",
   "binaries": {
     "windows_amd64": "bin/windows_amd64/plugin.exe",
     "linux_amd64": "bin/linux_amd64/plugin",
@@ -11,7 +11,7 @@
   },
   "capabilities": {
     "payment": {
-      "methods": ["yipay", "wechatpay", "alipay"]
+      "methods": ["alipay", "wxpay", "qqpay"]
     }
   }
 }

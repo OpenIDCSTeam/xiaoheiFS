@@ -13,6 +13,10 @@
 *.so
 *.dylib
 
+# plugin build outputs (multi-platform)
+/backend/plugins/**/bin/
+/backend/plugins/**/plugin
+
 # Test binary, built with `go test -c`
 *.test
 

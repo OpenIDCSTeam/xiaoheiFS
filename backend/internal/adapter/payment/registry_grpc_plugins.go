@@ -37,7 +37,7 @@ func (p *grpcPaymentProvider) CreatePayment(ctx context.Context, req usecase.Pay
 	if p.mgr == nil {
 		return usecase.PaymentCreateResult{}, errors.New("plugin manager missing")
 	}
-	client, ok := p.mgr.GetPaymentClient(p.category, p.pluginID)
+	client, ok := p.mgr.GetPaymentClient(p.category, p.pluginID, plugins.DefaultInstanceID)
 	if !ok {
 		return usecase.PaymentCreateResult{}, usecase.ErrForbidden
 	}
@@ -53,7 +53,7 @@ func (p *grpcPaymentProvider) CreatePayment(ctx context.Context, req usecase.Pay
 			Subject:   req.Subject,
 			ReturnUrl: req.ReturnURL,
 			NotifyUrl: req.NotifyURL,
-			Extra:     map[string]string{},
+			Extra:     req.Extra,
 		},
 	})
 	if err != nil {
@@ -76,7 +76,7 @@ func (p *grpcPaymentProvider) VerifyNotify(ctx context.Context, req usecase.RawH
 	if p.mgr == nil {
 		return usecase.PaymentNotifyResult{}, errors.New("plugin manager missing")
 	}
-	client, ok := p.mgr.GetPaymentClient(p.category, p.pluginID)
+	client, ok := p.mgr.GetPaymentClient(p.category, p.pluginID, plugins.DefaultInstanceID)
 	if !ok {
 		return usecase.PaymentNotifyResult{}, usecase.ErrForbidden
 	}
@@ -113,6 +113,7 @@ func (p *grpcPaymentProvider) VerifyNotify(ctx context.Context, req usecase.RawH
 		"raw_json": resp.RawJson,
 	}
 	return usecase.PaymentNotifyResult{
+		OrderNo: resp.OrderNo,
 		TradeNo: resp.TradeNo,
 		Paid:    paid,
 		Amount:  resp.Amount,
@@ -128,16 +129,20 @@ func (r *Registry) grpcProviders(ctx context.Context) []usecase.PaymentProvider 
 	}
 	var out []usecase.PaymentProvider
 	for _, it := range items {
-		if !it.Enabled || it.Capabilities.Capabilities.Payment == nil {
+		if !it.Enabled || it.InstanceID != plugins.DefaultInstanceID || it.Capabilities.Capabilities.Payment == nil {
 			continue
 		}
+		enabledMap := r.pluginPaymentMethodEnabledMap(ctx, it.Category, it.PluginID, it.InstanceID)
 		methods := it.Capabilities.Capabilities.Payment.Methods
 		for _, m := range methods {
 			m = strings.TrimSpace(m)
 			if m == "" || strings.Contains(m, ".") {
 				continue
 			}
-			if _, ok := r.grpcPlugins.GetPaymentClient(it.Category, it.PluginID); !ok {
+			if ok, exists := enabledMap[m]; exists && !ok {
+				continue
+			}
+			if _, ok := r.grpcPlugins.GetPaymentClient(it.Category, it.PluginID, it.InstanceID); !ok {
 				continue
 			}
 			out = append(out, &grpcPaymentProvider{
@@ -167,12 +172,16 @@ func (r *Registry) grpcProviderByKey(ctx context.Context, key string) usecase.Pa
 		return nil
 	}
 	for _, it := range items {
-		if !it.Enabled || it.PluginID != pluginID || it.Capabilities.Capabilities.Payment == nil {
+		if !it.Enabled || it.InstanceID != plugins.DefaultInstanceID || it.PluginID != pluginID || it.Capabilities.Capabilities.Payment == nil {
 			continue
 		}
+		enabledMap := r.pluginPaymentMethodEnabledMap(ctx, it.Category, it.PluginID, it.InstanceID)
 		for _, m := range it.Capabilities.Capabilities.Payment.Methods {
 			if m == method {
-				if _, ok := r.grpcPlugins.GetPaymentClient(it.Category, it.PluginID); !ok {
+				if ok, exists := enabledMap[method]; exists && !ok {
+					return nil
+				}
+				if _, ok := r.grpcPlugins.GetPaymentClient(it.Category, it.PluginID, it.InstanceID); !ok {
 					return nil
 				}
 				return &grpcPaymentProvider{
@@ -186,4 +195,19 @@ func (r *Registry) grpcProviderByKey(ctx context.Context, key string) usecase.Pa
 		}
 	}
 	return nil
+}
+
+func (r *Registry) pluginPaymentMethodEnabledMap(ctx context.Context, category, pluginID, instanceID string) map[string]bool {
+	if r.methodRepo == nil {
+		return nil
+	}
+	items, err := r.methodRepo.ListPluginPaymentMethods(ctx, category, pluginID, instanceID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(items))
+	for _, it := range items {
+		out[it.Method] = it.Enabled
+	}
+	return out
 }

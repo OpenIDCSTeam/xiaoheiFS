@@ -23,9 +23,12 @@
             />
           </template>
           <template v-else-if="column.key === 'actions'">
-            <a-button type="link" @click="openConfigModal(record)">
-              配置
-            </a-button>
+            <a-space>
+              <a-button type="link" @click="openConfigModal(record)">配置</a-button>
+              <a-button v-if="pluginKeyFromProvider(record?.key)" type="link" @click="openPluginMethods(record)">
+                Methods
+              </a-button>
+            </a-space>
           </template>
         </template>
       </a-table>
@@ -66,13 +69,42 @@
         <a-alert v-else type="info" message="该支付方式无需配置" show-icon />
       </a-form>
     </a-modal>
+
+    <!-- Plugin payment methods (host-managed) -->
+    <a-modal v-model:open="methodsOpen" title="Plugin payment methods" width="560px" :footer="null">
+      <a-alert
+        type="info"
+        show-icon
+        message="ListMethods 由插件声明；启用/停用开关由宿主管理。未设置开关的 method 默认启用。"
+        style="margin-bottom: 12px"
+      />
+      <a-spin :spinning="methodsLoading">
+        <a-table :columns="methodsColumns" :data-source="methodItems" :pagination="false" row-key="method">
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'enabled'">
+              <a-switch
+                :checked="!!record.enabled"
+                :loading="methodBusyKey === record.method"
+                @change="(checked:boolean)=>toggleMethod(record.method, checked)"
+              />
+            </template>
+          </template>
+        </a-table>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from "vue";
 import { message } from "ant-design-vue";
-import { listAdminPaymentProviders, updateAdminPaymentProvider } from "@/services/admin";
+import {
+  listAdminPaymentProviders,
+  listAdminPluginPaymentMethods,
+  updateAdminPaymentProvider,
+  updateAdminPluginPaymentMethod
+} from "@/services/admin";
+import type { PluginPaymentMethodItem } from "@/services/types";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -80,6 +112,11 @@ const configSaving = ref(false);
 const configModalVisible = ref(false);
 const providers = ref<any[]>([]);
 const currentProvider = ref<any>(null);
+const methodsOpen = ref(false);
+const methodsLoading = ref(false);
+const methodBusyKey = ref("");
+const methodItems = ref<PluginPaymentMethodItem[]>([]);
+const currentPlugin = ref<{ plugin_id: string; instance_id: string } | null>(null);
 
 const configForm = reactive<Record<string, any>>({});
 
@@ -89,6 +126,19 @@ const columns = [
   { title: "状态", dataIndex: "enabled", key: "enabled", width: 100 },
   { title: "操作", key: "actions", width: 100 }
 ];
+
+const methodsColumns = [
+  { title: "method", dataIndex: "method", key: "method" },
+  { title: "enabled", key: "enabled", width: 120 }
+];
+
+const pluginKeyFromProvider = (providerKey?: string) => {
+  const k = String(providerKey || "").trim();
+  if (!k) return "";
+  const idx = k.indexOf(".");
+  if (idx <= 0) return "";
+  return k.slice(0, idx);
+};
 
 const configFields = computed(() => {
   if (!currentProvider.value?.schema_json) return [];
@@ -144,6 +194,48 @@ const saveConfig = async () => {
     message.error(error.response?.data?.error || "保存失败");
   } finally {
     configSaving.value = false;
+  }
+};
+
+const openPluginMethods = async (record: any) => {
+  const pluginID = pluginKeyFromProvider(record?.key);
+  if (!pluginID) return;
+  currentPlugin.value = { plugin_id: pluginID, instance_id: "default" };
+  methodsOpen.value = true;
+  methodsLoading.value = true;
+  try {
+    const res = await listAdminPluginPaymentMethods({
+      category: "payment",
+      plugin_id: pluginID,
+      instance_id: "default"
+    });
+    methodItems.value = (res.data?.items || []) as PluginPaymentMethodItem[];
+  } catch (e: any) {
+    message.error(e?.response?.data?.error || "加载失败");
+  } finally {
+    methodsLoading.value = false;
+  }
+};
+
+const toggleMethod = async (method: string, enabled: boolean) => {
+  const cur = currentPlugin.value;
+  if (!cur) return;
+  methodBusyKey.value = method;
+  try {
+    await updateAdminPluginPaymentMethod({
+      category: "payment",
+      plugin_id: cur.plugin_id,
+      instance_id: cur.instance_id,
+      method,
+      enabled
+    });
+    const it = methodItems.value.find((x) => x.method === method);
+    if (it) it.enabled = enabled;
+    message.success("OK");
+  } catch (e: any) {
+    message.error(e?.response?.data?.error || "failed");
+  } finally {
+    methodBusyKey.value = "";
   }
 };
 

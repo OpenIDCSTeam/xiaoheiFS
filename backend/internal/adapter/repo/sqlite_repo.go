@@ -151,8 +151,88 @@ func (r *SQLiteRepo) DeleteCaptcha(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *SQLiteRepo) CreateVerificationCode(ctx context.Context, code domain.VerificationCode) error {
+	res, err := r.db.ExecContext(ctx, `INSERT INTO verification_codes(channel,receiver,purpose,code_hash,expires_at,created_at)
+		VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)`, code.Channel, code.Receiver, code.Purpose, code.CodeHash, code.ExpiresAt)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	code.ID = id
+	return nil
+}
+
+func (r *SQLiteRepo) GetLatestVerificationCode(ctx context.Context, channel, receiver, purpose string) (domain.VerificationCode, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT id, channel, receiver, purpose, code_hash, expires_at, created_at
+		FROM verification_codes
+		WHERE channel = ? AND receiver = ? AND purpose = ?
+		ORDER BY id DESC LIMIT 1`, channel, receiver, purpose)
+	var out domain.VerificationCode
+	if err := row.Scan(&out.ID, &out.Channel, &out.Receiver, &out.Purpose, &out.CodeHash, &out.ExpiresAt, &out.CreatedAt); err != nil {
+		return domain.VerificationCode{}, rEnsure(err)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepo) DeleteVerificationCodes(ctx context.Context, channel, receiver, purpose string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM verification_codes WHERE channel = ? AND receiver = ? AND purpose = ?`, channel, receiver, purpose)
+	return err
+}
+
+func (r *SQLiteRepo) ListGoodsTypes(ctx context.Context) ([]domain.GoodsType, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, code, name, active, sort_order, automation_category, automation_plugin_id, automation_instance_id, created_at, updated_at FROM goods_types ORDER BY sort_order, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.GoodsType
+	for rows.Next() {
+		var gt domain.GoodsType
+		var active int
+		if err := rows.Scan(&gt.ID, &gt.Code, &gt.Name, &active, &gt.SortOrder, &gt.AutomationCategory, &gt.AutomationPluginID, &gt.AutomationInstanceID, &gt.CreatedAt, &gt.UpdatedAt); err != nil {
+			return nil, err
+		}
+		gt.Active = active == 1
+		out = append(out, gt)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepo) GetGoodsType(ctx context.Context, id int64) (domain.GoodsType, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT id, code, name, active, sort_order, automation_category, automation_plugin_id, automation_instance_id, created_at, updated_at FROM goods_types WHERE id = ?`, id)
+	var gt domain.GoodsType
+	var active int
+	if err := row.Scan(&gt.ID, &gt.Code, &gt.Name, &active, &gt.SortOrder, &gt.AutomationCategory, &gt.AutomationPluginID, &gt.AutomationInstanceID, &gt.CreatedAt, &gt.UpdatedAt); err != nil {
+		return domain.GoodsType{}, r.ensure(err)
+	}
+	gt.Active = active == 1
+	return gt, nil
+}
+
+func (r *SQLiteRepo) CreateGoodsType(ctx context.Context, gt *domain.GoodsType) error {
+	res, err := r.db.ExecContext(ctx, `INSERT INTO goods_types(code,name,active,sort_order,automation_category,automation_plugin_id,automation_instance_id) VALUES (?,?,?,?,?,?,?)`,
+		nullIfEmpty(gt.Code), gt.Name, boolToInt(gt.Active), gt.SortOrder, gt.AutomationCategory, gt.AutomationPluginID, gt.AutomationInstanceID)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	gt.ID = id
+	return nil
+}
+
+func (r *SQLiteRepo) UpdateGoodsType(ctx context.Context, gt domain.GoodsType) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE goods_types SET code = ?, name = ?, active = ?, sort_order = ?, automation_category = ?, automation_plugin_id = ?, automation_instance_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		nullIfEmpty(gt.Code), gt.Name, boolToInt(gt.Active), gt.SortOrder, gt.AutomationCategory, gt.AutomationPluginID, gt.AutomationInstanceID, gt.ID)
+	return err
+}
+
+func (r *SQLiteRepo) DeleteGoodsType(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM goods_types WHERE id = ?`, id)
+	return err
+}
+
 func (r *SQLiteRepo) ListRegions(ctx context.Context) ([]domain.Region, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, code, name, active FROM regions ORDER BY id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, goods_type_id, code, name, active FROM regions ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +241,7 @@ func (r *SQLiteRepo) ListRegions(ctx context.Context) ([]domain.Region, error) {
 	for rows.Next() {
 		var region domain.Region
 		var active int
-		if err := rows.Scan(&region.ID, &region.Code, &region.Name, &active); err != nil {
+		if err := rows.Scan(&region.ID, &region.GoodsTypeID, &region.Code, &region.Name, &active); err != nil {
 			return nil, err
 		}
 		region.Active = active == 1
@@ -171,7 +251,7 @@ func (r *SQLiteRepo) ListRegions(ctx context.Context) ([]domain.Region, error) {
 }
 
 func (r *SQLiteRepo) CreateRegion(ctx context.Context, region *domain.Region) error {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO regions(code,name,active) VALUES (?,?,?)`, region.Code, region.Name, boolToInt(region.Active))
+	res, err := r.db.ExecContext(ctx, `INSERT INTO regions(goods_type_id,code,name,active) VALUES (?,?,?,?)`, region.GoodsTypeID, region.Code, region.Name, boolToInt(region.Active))
 	if err != nil {
 		return err
 	}
@@ -181,7 +261,7 @@ func (r *SQLiteRepo) CreateRegion(ctx context.Context, region *domain.Region) er
 }
 
 func (r *SQLiteRepo) UpdateRegion(ctx context.Context, region domain.Region) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE regions SET code = ?, name = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, region.Code, region.Name, boolToInt(region.Active), region.ID)
+	_, err := r.db.ExecContext(ctx, `UPDATE regions SET goods_type_id = ?, code = ?, name = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, region.GoodsTypeID, region.Code, region.Name, boolToInt(region.Active), region.ID)
 	return err
 }
 
@@ -191,7 +271,7 @@ func (r *SQLiteRepo) DeleteRegion(ctx context.Context, id int64) error {
 }
 
 func (r *SQLiteRepo) ListPlanGroups(ctx context.Context) ([]domain.PlanGroup, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, region_id, name, line_id, unit_core, unit_mem, unit_disk, unit_bw, add_core_min, add_core_max, add_core_step, add_mem_min, add_mem_max, add_mem_step, add_disk_min, add_disk_max, add_disk_step, add_bw_min, add_bw_max, add_bw_step, active, visible, capacity_remaining, sort_order FROM plan_groups ORDER BY sort_order, id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, goods_type_id, region_id, name, line_id, unit_core, unit_mem, unit_disk, unit_bw, add_core_min, add_core_max, add_core_step, add_mem_min, add_mem_max, add_mem_step, add_disk_min, add_disk_max, add_disk_step, add_bw_min, add_bw_max, add_bw_step, active, visible, capacity_remaining, sort_order FROM plan_groups ORDER BY sort_order, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +281,7 @@ func (r *SQLiteRepo) ListPlanGroups(ctx context.Context) ([]domain.PlanGroup, er
 		var pg domain.PlanGroup
 		var active int
 		var visible int
-		if err := rows.Scan(&pg.ID, &pg.RegionID, &pg.Name, &pg.LineID, &pg.UnitCore, &pg.UnitMem, &pg.UnitDisk, &pg.UnitBW, &pg.AddCoreMin, &pg.AddCoreMax, &pg.AddCoreStep, &pg.AddMemMin, &pg.AddMemMax, &pg.AddMemStep, &pg.AddDiskMin, &pg.AddDiskMax, &pg.AddDiskStep, &pg.AddBWMin, &pg.AddBWMax, &pg.AddBWStep, &active, &visible, &pg.CapacityRemaining, &pg.SortOrder); err != nil {
+		if err := rows.Scan(&pg.ID, &pg.GoodsTypeID, &pg.RegionID, &pg.Name, &pg.LineID, &pg.UnitCore, &pg.UnitMem, &pg.UnitDisk, &pg.UnitBW, &pg.AddCoreMin, &pg.AddCoreMax, &pg.AddCoreStep, &pg.AddMemMin, &pg.AddMemMax, &pg.AddMemStep, &pg.AddDiskMin, &pg.AddDiskMax, &pg.AddDiskStep, &pg.AddBWMin, &pg.AddBWMax, &pg.AddBWStep, &active, &visible, &pg.CapacityRemaining, &pg.SortOrder); err != nil {
 			return nil, err
 		}
 		pg.Active = active == 1
@@ -212,7 +292,7 @@ func (r *SQLiteRepo) ListPlanGroups(ctx context.Context) ([]domain.PlanGroup, er
 }
 
 func (r *SQLiteRepo) CreatePlanGroup(ctx context.Context, plan *domain.PlanGroup) error {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO plan_groups(region_id,name,line_id,unit_core,unit_mem,unit_disk,unit_bw,add_core_min,add_core_max,add_core_step,add_mem_min,add_mem_max,add_mem_step,add_disk_min,add_disk_max,add_disk_step,add_bw_min,add_bw_max,add_bw_step,active,visible,capacity_remaining,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, plan.RegionID, plan.Name, plan.LineID, plan.UnitCore, plan.UnitMem, plan.UnitDisk, plan.UnitBW, plan.AddCoreMin, plan.AddCoreMax, plan.AddCoreStep, plan.AddMemMin, plan.AddMemMax, plan.AddMemStep, plan.AddDiskMin, plan.AddDiskMax, plan.AddDiskStep, plan.AddBWMin, plan.AddBWMax, plan.AddBWStep, boolToInt(plan.Active), boolToInt(plan.Visible), plan.CapacityRemaining, plan.SortOrder)
+	res, err := r.db.ExecContext(ctx, `INSERT INTO plan_groups(goods_type_id,region_id,name,line_id,unit_core,unit_mem,unit_disk,unit_bw,add_core_min,add_core_max,add_core_step,add_mem_min,add_mem_max,add_mem_step,add_disk_min,add_disk_max,add_disk_step,add_bw_min,add_bw_max,add_bw_step,active,visible,capacity_remaining,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, plan.GoodsTypeID, plan.RegionID, plan.Name, plan.LineID, plan.UnitCore, plan.UnitMem, plan.UnitDisk, plan.UnitBW, plan.AddCoreMin, plan.AddCoreMax, plan.AddCoreStep, plan.AddMemMin, plan.AddMemMax, plan.AddMemStep, plan.AddDiskMin, plan.AddDiskMax, plan.AddDiskStep, plan.AddBWMin, plan.AddBWMax, plan.AddBWStep, boolToInt(plan.Active), boolToInt(plan.Visible), plan.CapacityRemaining, plan.SortOrder)
 	if err != nil {
 		return err
 	}
@@ -222,7 +302,7 @@ func (r *SQLiteRepo) CreatePlanGroup(ctx context.Context, plan *domain.PlanGroup
 }
 
 func (r *SQLiteRepo) UpdatePlanGroup(ctx context.Context, plan domain.PlanGroup) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE plan_groups SET region_id = ?, name = ?, line_id = ?, unit_core = ?, unit_mem = ?, unit_disk = ?, unit_bw = ?, add_core_min = ?, add_core_max = ?, add_core_step = ?, add_mem_min = ?, add_mem_max = ?, add_mem_step = ?, add_disk_min = ?, add_disk_max = ?, add_disk_step = ?, add_bw_min = ?, add_bw_max = ?, add_bw_step = ?, active = ?, visible = ?, capacity_remaining = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, plan.RegionID, plan.Name, plan.LineID, plan.UnitCore, plan.UnitMem, plan.UnitDisk, plan.UnitBW, plan.AddCoreMin, plan.AddCoreMax, plan.AddCoreStep, plan.AddMemMin, plan.AddMemMax, plan.AddMemStep, plan.AddDiskMin, plan.AddDiskMax, plan.AddDiskStep, plan.AddBWMin, plan.AddBWMax, plan.AddBWStep, boolToInt(plan.Active), boolToInt(plan.Visible), plan.CapacityRemaining, plan.SortOrder, plan.ID)
+	_, err := r.db.ExecContext(ctx, `UPDATE plan_groups SET goods_type_id = ?, region_id = ?, name = ?, line_id = ?, unit_core = ?, unit_mem = ?, unit_disk = ?, unit_bw = ?, add_core_min = ?, add_core_max = ?, add_core_step = ?, add_mem_min = ?, add_mem_max = ?, add_mem_step = ?, add_disk_min = ?, add_disk_max = ?, add_disk_step = ?, add_bw_min = ?, add_bw_max = ?, add_bw_step = ?, active = ?, visible = ?, capacity_remaining = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, plan.GoodsTypeID, plan.RegionID, plan.Name, plan.LineID, plan.UnitCore, plan.UnitMem, plan.UnitDisk, plan.UnitBW, plan.AddCoreMin, plan.AddCoreMax, plan.AddCoreStep, plan.AddMemMin, plan.AddMemMax, plan.AddMemStep, plan.AddDiskMin, plan.AddDiskMax, plan.AddDiskStep, plan.AddBWMin, plan.AddBWMax, plan.AddBWStep, boolToInt(plan.Active), boolToInt(plan.Visible), plan.CapacityRemaining, plan.SortOrder, plan.ID)
 	return err
 }
 
@@ -232,7 +312,7 @@ func (r *SQLiteRepo) DeletePlanGroup(ctx context.Context, id int64) error {
 }
 
 func (r *SQLiteRepo) ListPackages(ctx context.Context) ([]domain.Package, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, plan_group_id, product_id, name, cores, memory_gb, disk_gb, bandwidth_mbps, cpu_model, monthly_price, port_num, sort_order, active, visible, capacity_remaining FROM packages ORDER BY sort_order, id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, goods_type_id, plan_group_id, product_id, name, cores, memory_gb, disk_gb, bandwidth_mbps, cpu_model, monthly_price, port_num, sort_order, active, visible, capacity_remaining FROM packages ORDER BY sort_order, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +322,7 @@ func (r *SQLiteRepo) ListPackages(ctx context.Context) ([]domain.Package, error)
 		var pkg domain.Package
 		var active int
 		var visible int
-		if err := rows.Scan(&pkg.ID, &pkg.PlanGroupID, &pkg.ProductID, &pkg.Name, &pkg.Cores, &pkg.MemoryGB, &pkg.DiskGB, &pkg.BandwidthMB, &pkg.CPUModel, &pkg.Monthly, &pkg.PortNum, &pkg.SortOrder, &active, &visible, &pkg.CapacityRemaining); err != nil {
+		if err := rows.Scan(&pkg.ID, &pkg.GoodsTypeID, &pkg.PlanGroupID, &pkg.ProductID, &pkg.Name, &pkg.Cores, &pkg.MemoryGB, &pkg.DiskGB, &pkg.BandwidthMB, &pkg.CPUModel, &pkg.Monthly, &pkg.PortNum, &pkg.SortOrder, &active, &visible, &pkg.CapacityRemaining); err != nil {
 			return nil, err
 		}
 		pkg.Active = active == 1
@@ -253,7 +333,7 @@ func (r *SQLiteRepo) ListPackages(ctx context.Context) ([]domain.Package, error)
 }
 
 func (r *SQLiteRepo) CreatePackage(ctx context.Context, pkg *domain.Package) error {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO packages(plan_group_id,product_id,name,cores,memory_gb,disk_gb,bandwidth_mbps,cpu_model,monthly_price,port_num,sort_order,active,visible,capacity_remaining) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, pkg.PlanGroupID, pkg.ProductID, pkg.Name, pkg.Cores, pkg.MemoryGB, pkg.DiskGB, pkg.BandwidthMB, pkg.CPUModel, pkg.Monthly, pkg.PortNum, pkg.SortOrder, boolToInt(pkg.Active), boolToInt(pkg.Visible), pkg.CapacityRemaining)
+	res, err := r.db.ExecContext(ctx, `INSERT INTO packages(goods_type_id,plan_group_id,product_id,name,cores,memory_gb,disk_gb,bandwidth_mbps,cpu_model,monthly_price,port_num,sort_order,active,visible,capacity_remaining) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, pkg.GoodsTypeID, pkg.PlanGroupID, pkg.ProductID, pkg.Name, pkg.Cores, pkg.MemoryGB, pkg.DiskGB, pkg.BandwidthMB, pkg.CPUModel, pkg.Monthly, pkg.PortNum, pkg.SortOrder, boolToInt(pkg.Active), boolToInt(pkg.Visible), pkg.CapacityRemaining)
 	if err != nil {
 		return err
 	}
@@ -263,7 +343,7 @@ func (r *SQLiteRepo) CreatePackage(ctx context.Context, pkg *domain.Package) err
 }
 
 func (r *SQLiteRepo) UpdatePackage(ctx context.Context, pkg domain.Package) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE packages SET plan_group_id = ?, product_id = ?, name = ?, cores = ?, memory_gb = ?, disk_gb = ?, bandwidth_mbps = ?, cpu_model = ?, monthly_price = ?, port_num = ?, sort_order = ?, active = ?, visible = ?, capacity_remaining = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, pkg.PlanGroupID, pkg.ProductID, pkg.Name, pkg.Cores, pkg.MemoryGB, pkg.DiskGB, pkg.BandwidthMB, pkg.CPUModel, pkg.Monthly, pkg.PortNum, pkg.SortOrder, boolToInt(pkg.Active), boolToInt(pkg.Visible), pkg.CapacityRemaining, pkg.ID)
+	_, err := r.db.ExecContext(ctx, `UPDATE packages SET goods_type_id = ?, plan_group_id = ?, product_id = ?, name = ?, cores = ?, memory_gb = ?, disk_gb = ?, bandwidth_mbps = ?, cpu_model = ?, monthly_price = ?, port_num = ?, sort_order = ?, active = ?, visible = ?, capacity_remaining = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, pkg.GoodsTypeID, pkg.PlanGroupID, pkg.ProductID, pkg.Name, pkg.Cores, pkg.MemoryGB, pkg.DiskGB, pkg.BandwidthMB, pkg.CPUModel, pkg.Monthly, pkg.PortNum, pkg.SortOrder, boolToInt(pkg.Active), boolToInt(pkg.Visible), pkg.CapacityRemaining, pkg.ID)
 	return err
 }
 
@@ -273,11 +353,11 @@ func (r *SQLiteRepo) DeletePackage(ctx context.Context, id int64) error {
 }
 
 func (r *SQLiteRepo) GetPackage(ctx context.Context, id int64) (domain.Package, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, plan_group_id, product_id, name, cores, memory_gb, disk_gb, bandwidth_mbps, cpu_model, monthly_price, port_num, sort_order, active, visible, capacity_remaining FROM packages WHERE id = ?`, id)
+	row := r.db.QueryRowContext(ctx, `SELECT id, goods_type_id, plan_group_id, product_id, name, cores, memory_gb, disk_gb, bandwidth_mbps, cpu_model, monthly_price, port_num, sort_order, active, visible, capacity_remaining FROM packages WHERE id = ?`, id)
 	var pkg domain.Package
 	var active int
 	var visible int
-	if err := row.Scan(&pkg.ID, &pkg.PlanGroupID, &pkg.ProductID, &pkg.Name, &pkg.Cores, &pkg.MemoryGB, &pkg.DiskGB, &pkg.BandwidthMB, &pkg.CPUModel, &pkg.Monthly, &pkg.PortNum, &pkg.SortOrder, &active, &visible, &pkg.CapacityRemaining); err != nil {
+	if err := row.Scan(&pkg.ID, &pkg.GoodsTypeID, &pkg.PlanGroupID, &pkg.ProductID, &pkg.Name, &pkg.Cores, &pkg.MemoryGB, &pkg.DiskGB, &pkg.BandwidthMB, &pkg.CPUModel, &pkg.Monthly, &pkg.PortNum, &pkg.SortOrder, &active, &visible, &pkg.CapacityRemaining); err != nil {
 		return domain.Package{}, r.ensure(err)
 	}
 	pkg.Active = active == 1
@@ -286,11 +366,11 @@ func (r *SQLiteRepo) GetPackage(ctx context.Context, id int64) (domain.Package, 
 }
 
 func (r *SQLiteRepo) GetPlanGroup(ctx context.Context, id int64) (domain.PlanGroup, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, region_id, name, line_id, unit_core, unit_mem, unit_disk, unit_bw, add_core_min, add_core_max, add_core_step, add_mem_min, add_mem_max, add_mem_step, add_disk_min, add_disk_max, add_disk_step, add_bw_min, add_bw_max, add_bw_step, active, visible, capacity_remaining, sort_order FROM plan_groups WHERE id = ?`, id)
+	row := r.db.QueryRowContext(ctx, `SELECT id, goods_type_id, region_id, name, line_id, unit_core, unit_mem, unit_disk, unit_bw, add_core_min, add_core_max, add_core_step, add_mem_min, add_mem_max, add_mem_step, add_disk_min, add_disk_max, add_disk_step, add_bw_min, add_bw_max, add_bw_step, active, visible, capacity_remaining, sort_order FROM plan_groups WHERE id = ?`, id)
 	var pg domain.PlanGroup
 	var active int
 	var visible int
-	if err := row.Scan(&pg.ID, &pg.RegionID, &pg.Name, &pg.LineID, &pg.UnitCore, &pg.UnitMem, &pg.UnitDisk, &pg.UnitBW, &pg.AddCoreMin, &pg.AddCoreMax, &pg.AddCoreStep, &pg.AddMemMin, &pg.AddMemMax, &pg.AddMemStep, &pg.AddDiskMin, &pg.AddDiskMax, &pg.AddDiskStep, &pg.AddBWMin, &pg.AddBWMax, &pg.AddBWStep, &active, &visible, &pg.CapacityRemaining, &pg.SortOrder); err != nil {
+	if err := row.Scan(&pg.ID, &pg.GoodsTypeID, &pg.RegionID, &pg.Name, &pg.LineID, &pg.UnitCore, &pg.UnitMem, &pg.UnitDisk, &pg.UnitBW, &pg.AddCoreMin, &pg.AddCoreMax, &pg.AddCoreStep, &pg.AddMemMin, &pg.AddMemMax, &pg.AddMemStep, &pg.AddDiskMin, &pg.AddDiskMax, &pg.AddDiskStep, &pg.AddBWMin, &pg.AddBWMax, &pg.AddBWStep, &active, &visible, &pg.CapacityRemaining, &pg.SortOrder); err != nil {
 		return domain.PlanGroup{}, r.ensure(err)
 	}
 	pg.Active = active == 1
@@ -299,10 +379,10 @@ func (r *SQLiteRepo) GetPlanGroup(ctx context.Context, id int64) (domain.PlanGro
 }
 
 func (r *SQLiteRepo) GetRegion(ctx context.Context, id int64) (domain.Region, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, code, name, active FROM regions WHERE id = ?`, id)
+	row := r.db.QueryRowContext(ctx, `SELECT id, goods_type_id, code, name, active FROM regions WHERE id = ?`, id)
 	var region domain.Region
 	var active int
-	if err := row.Scan(&region.ID, &region.Code, &region.Name, &active); err != nil {
+	if err := row.Scan(&region.ID, &region.GoodsTypeID, &region.Code, &region.Name, &active); err != nil {
 		return domain.Region{}, r.ensure(err)
 	}
 	region.Active = active == 1
@@ -472,14 +552,14 @@ func (r *SQLiteRepo) CreateOrderFromCartAtomic(ctx context.Context, order domain
 	id, _ := res.LastInsertId()
 	order.ID = id
 
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO order_items(order_id,package_id,system_id,spec_json,qty,amount,status,automation_instance_id,action,duration_months) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO order_items(order_id,package_id,system_id,spec_json,qty,amount,status,goods_type_id,automation_instance_id,action,duration_months) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return domain.Order{}, nil, err
 	}
 	defer stmt.Close()
 	for i := range items {
 		items[i].OrderID = order.ID
-		res, err := stmt.ExecContext(ctx, items[i].OrderID, items[i].PackageID, items[i].SystemID, items[i].SpecJSON, items[i].Qty, items[i].Amount, items[i].Status, items[i].AutomationInstanceID, items[i].Action, items[i].DurationMonths)
+		res, err := stmt.ExecContext(ctx, items[i].OrderID, items[i].PackageID, items[i].SystemID, items[i].SpecJSON, items[i].Qty, items[i].Amount, items[i].Status, items[i].GoodsTypeID, items[i].AutomationInstanceID, items[i].Action, items[i].DurationMonths)
 		if err != nil {
 			return domain.Order{}, nil, err
 		}
@@ -676,7 +756,7 @@ func (r *SQLiteRepo) CreateOrderItems(ctx context.Context, items []domain.OrderI
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO order_items(order_id,package_id,system_id,spec_json,qty,amount,status,automation_instance_id,action,duration_months) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO order_items(order_id,package_id,system_id,spec_json,qty,amount,status,goods_type_id,automation_instance_id,action,duration_months) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -684,7 +764,7 @@ func (r *SQLiteRepo) CreateOrderItems(ctx context.Context, items []domain.OrderI
 	defer stmt.Close()
 	for i := range items {
 		item := &items[i]
-		res, err := stmt.ExecContext(ctx, item.OrderID, item.PackageID, item.SystemID, item.SpecJSON, item.Qty, item.Amount, item.Status, item.AutomationInstanceID, item.Action, item.DurationMonths)
+		res, err := stmt.ExecContext(ctx, item.OrderID, item.PackageID, item.SystemID, item.SpecJSON, item.Qty, item.Amount, item.Status, item.GoodsTypeID, item.AutomationInstanceID, item.Action, item.DurationMonths)
 		if err != nil {
 			_ = tx.Rollback()
 			return err
@@ -696,7 +776,7 @@ func (r *SQLiteRepo) CreateOrderItems(ctx context.Context, items []domain.OrderI
 }
 
 func (r *SQLiteRepo) ListOrderItems(ctx context.Context, orderID int64) ([]domain.OrderItem, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, order_id, package_id, system_id, spec_json, qty, amount, status, automation_instance_id, action, duration_months, created_at, updated_at FROM order_items WHERE order_id = ? ORDER BY id ASC`, orderID)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, order_id, package_id, system_id, spec_json, qty, amount, status, goods_type_id, automation_instance_id, action, duration_months, created_at, updated_at FROM order_items WHERE order_id = ? ORDER BY id ASC`, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -713,7 +793,7 @@ func (r *SQLiteRepo) ListOrderItems(ctx context.Context, orderID int64) ([]domai
 }
 
 func (r *SQLiteRepo) GetOrderItem(ctx context.Context, id int64) (domain.OrderItem, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, order_id, package_id, system_id, spec_json, qty, amount, status, automation_instance_id, action, duration_months, created_at, updated_at FROM order_items WHERE id = ?`, id)
+	row := r.db.QueryRowContext(ctx, `SELECT id, order_id, package_id, system_id, spec_json, qty, amount, status, goods_type_id, automation_instance_id, action, duration_months, created_at, updated_at FROM order_items WHERE id = ?`, id)
 	return scanOrderItem(row)
 }
 
@@ -780,8 +860,8 @@ func (r *SQLiteRepo) UpdateOrderItemAutomation(ctx context.Context, id int64, au
 }
 
 func (r *SQLiteRepo) CreateInstance(ctx context.Context, inst *domain.VPSInstance) error {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO vps_instances(user_id,order_item_id,automation_instance_id,name,region,region_id,line_id,package_id,package_name,cpu,memory_gb,disk_gb,bandwidth_mbps,port_num,monthly_price,spec_json,system_id,status,automation_state,admin_status,expire_at,panel_url_cache,access_info_json,last_emergency_renew_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		inst.UserID, inst.OrderItemID, inst.AutomationInstanceID, inst.Name, inst.Region, inst.RegionID, inst.LineID, inst.PackageID, inst.PackageName, inst.CPU, inst.MemoryGB, inst.DiskGB, inst.BandwidthMB, inst.PortNum, inst.MonthlyPrice, inst.SpecJSON, inst.SystemID, inst.Status, inst.AutomationState, inst.AdminStatus, inst.ExpireAt, inst.PanelURLCache, inst.AccessInfoJSON, inst.LastEmergencyRenewAt)
+	res, err := r.db.ExecContext(ctx, `INSERT INTO vps_instances(user_id,order_item_id,automation_instance_id,goods_type_id,name,region,region_id,line_id,package_id,package_name,cpu,memory_gb,disk_gb,bandwidth_mbps,port_num,monthly_price,spec_json,system_id,status,automation_state,admin_status,expire_at,panel_url_cache,access_info_json,last_emergency_renew_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		inst.UserID, inst.OrderItemID, inst.AutomationInstanceID, inst.GoodsTypeID, inst.Name, inst.Region, inst.RegionID, inst.LineID, inst.PackageID, inst.PackageName, inst.CPU, inst.MemoryGB, inst.DiskGB, inst.BandwidthMB, inst.PortNum, inst.MonthlyPrice, inst.SpecJSON, inst.SystemID, inst.Status, inst.AutomationState, inst.AdminStatus, inst.ExpireAt, inst.PanelURLCache, inst.AccessInfoJSON, inst.LastEmergencyRenewAt)
 	if err != nil {
 		return err
 	}
@@ -791,17 +871,17 @@ func (r *SQLiteRepo) CreateInstance(ctx context.Context, inst *domain.VPSInstanc
 }
 
 func (r *SQLiteRepo) GetInstance(ctx context.Context, id int64) (domain.VPSInstance, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE id = ?`, id)
+	row := r.db.QueryRowContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, goods_type_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE id = ?`, id)
 	return scanVPSInstance(row)
 }
 
 func (r *SQLiteRepo) GetInstanceByOrderItem(ctx context.Context, orderItemID int64) (domain.VPSInstance, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE order_item_id = ?`, orderItemID)
+	row := r.db.QueryRowContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, goods_type_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE order_item_id = ?`, orderItemID)
 	return scanVPSInstance(row)
 }
 
 func (r *SQLiteRepo) ListInstancesByUser(ctx context.Context, userID int64) ([]domain.VPSInstance, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE user_id = ? ORDER BY id DESC`, userID)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, goods_type_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE user_id = ? ORDER BY id DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +902,7 @@ func (r *SQLiteRepo) ListInstances(ctx context.Context, limit, offset int) ([]do
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM vps_instances`).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, goods_type_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -839,7 +919,7 @@ func (r *SQLiteRepo) ListInstances(ctx context.Context, limit, offset int) ([]do
 }
 
 func (r *SQLiteRepo) ListInstancesExpiring(ctx context.Context, before time.Time) ([]domain.VPSInstance, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE expire_at IS NOT NULL AND expire_at <= ? ORDER BY expire_at ASC`, before)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, order_item_id, automation_instance_id, goods_type_id, name, region, region_id, line_id, package_id, package_name, cpu, memory_gb, disk_gb, bandwidth_mbps, port_num, monthly_price, spec_json, system_id, status, automation_state, admin_status, expire_at, panel_url_cache, access_info_json, last_emergency_renew_at, created_at, updated_at FROM vps_instances WHERE expire_at IS NOT NULL AND expire_at <= ? ORDER BY expire_at ASC`, before)
 	if err != nil {
 		return nil, err
 	}
@@ -969,6 +1049,11 @@ func (r *SQLiteRepo) GetPaymentByIdempotencyKey(ctx context.Context, orderID int
 
 func (r *SQLiteRepo) UpdatePaymentStatus(ctx context.Context, id int64, status domain.PaymentStatus, reviewedBy *int64, reason string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE order_payments SET status = ?, reviewed_by = ?, review_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, status, reviewedBy, reason, id)
+	return err
+}
+
+func (r *SQLiteRepo) UpdatePaymentTradeNo(ctx context.Context, id int64, tradeNo string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE order_payments SET trade_no = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, tradeNo, id)
 	return err
 }
 
@@ -1107,7 +1192,7 @@ func (r *SQLiteRepo) UpsertPluginInstallation(ctx context.Context, inst *domain.
 	if r.gdb == nil {
 		_, err := r.db.ExecContext(ctx, `INSERT INTO plugin_installations(category,plugin_id,instance_id,enabled,signature_status,config_cipher,created_at,updated_at)
 			VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-			ON CONFLICT(category,plugin_id) DO UPDATE SET instance_id = excluded.instance_id, enabled = excluded.enabled, signature_status = excluded.signature_status, config_cipher = excluded.config_cipher, updated_at = CURRENT_TIMESTAMP`,
+			ON CONFLICT(category,plugin_id,instance_id) DO UPDATE SET enabled = excluded.enabled, signature_status = excluded.signature_status, config_cipher = excluded.config_cipher, updated_at = CURRENT_TIMESTAMP`,
 			inst.Category, inst.PluginID, inst.InstanceID, boolToInt(inst.Enabled), inst.SignatureStatus, inst.ConfigCipher,
 		)
 		return err
@@ -1122,9 +1207,8 @@ func (r *SQLiteRepo) UpsertPluginInstallation(ctx context.Context, inst *domain.
 	}
 	return r.gdb.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "category"}, {Name: "plugin_id"}},
+			Columns: []clause.Column{{Name: "category"}, {Name: "plugin_id"}, {Name: "instance_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"instance_id",
 				"enabled",
 				"signature_status",
 				"config_cipher",
@@ -1134,8 +1218,8 @@ func (r *SQLiteRepo) UpsertPluginInstallation(ctx context.Context, inst *domain.
 		Create(&m).Error
 }
 
-func (r *SQLiteRepo) GetPluginInstallation(ctx context.Context, category, pluginID string) (domain.PluginInstallation, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, category, plugin_id, instance_id, enabled, signature_status, config_cipher, created_at, updated_at FROM plugin_installations WHERE category = ? AND plugin_id = ?`, category, pluginID)
+func (r *SQLiteRepo) GetPluginInstallation(ctx context.Context, category, pluginID, instanceID string) (domain.PluginInstallation, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT id, category, plugin_id, instance_id, enabled, signature_status, config_cipher, created_at, updated_at FROM plugin_installations WHERE category = ? AND plugin_id = ? AND instance_id = ?`, category, pluginID, instanceID)
 	var inst domain.PluginInstallation
 	var enabled int
 	var sig string
@@ -1168,8 +1252,44 @@ func (r *SQLiteRepo) ListPluginInstallations(ctx context.Context) ([]domain.Plug
 	return out, nil
 }
 
-func (r *SQLiteRepo) DeletePluginInstallation(ctx context.Context, category, pluginID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM plugin_installations WHERE category = ? AND plugin_id = ?`, category, pluginID)
+func (r *SQLiteRepo) DeletePluginInstallation(ctx context.Context, category, pluginID, instanceID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM plugin_installations WHERE category = ? AND plugin_id = ? AND instance_id = ?`, category, pluginID, instanceID)
+	return err
+}
+
+func (r *SQLiteRepo) ListPluginPaymentMethods(ctx context.Context, category, pluginID, instanceID string) ([]domain.PluginPaymentMethod, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, category, plugin_id, instance_id, method, enabled, created_at, updated_at FROM plugin_payment_methods WHERE category = ? AND plugin_id = ? AND instance_id = ? ORDER BY method ASC`, category, pluginID, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.PluginPaymentMethod
+	for rows.Next() {
+		var m domain.PluginPaymentMethod
+		var enabled int
+		if err := rows.Scan(&m.ID, &m.Category, &m.PluginID, &m.InstanceID, &m.Method, &enabled, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		m.Enabled = enabled != 0
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepo) UpsertPluginPaymentMethod(ctx context.Context, m *domain.PluginPaymentMethod) error {
+	if m == nil || strings.TrimSpace(m.Category) == "" || strings.TrimSpace(m.PluginID) == "" || strings.TrimSpace(m.InstanceID) == "" || strings.TrimSpace(m.Method) == "" {
+		return usecase.ErrInvalidInput
+	}
+	_, err := r.db.ExecContext(ctx, `INSERT INTO plugin_payment_methods(category,plugin_id,instance_id,method,enabled,created_at,updated_at)
+		VALUES (?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+		ON CONFLICT(category,plugin_id,instance_id,method) DO UPDATE SET enabled = excluded.enabled, updated_at = CURRENT_TIMESTAMP`,
+		m.Category, m.PluginID, m.InstanceID, m.Method, boolToInt(m.Enabled),
+	)
+	return err
+}
+
+func (r *SQLiteRepo) DeletePluginPaymentMethod(ctx context.Context, category, pluginID, instanceID, method string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM plugin_payment_methods WHERE category = ? AND plugin_id = ? AND instance_id = ? AND method = ?`, category, pluginID, instanceID, method)
 	return err
 }
 
@@ -2655,7 +2775,7 @@ func scanOrder(row scanner) (domain.Order, error) {
 
 func scanOrderItem(row scanner) (domain.OrderItem, error) {
 	var item domain.OrderItem
-	if err := row.Scan(&item.ID, &item.OrderID, &item.PackageID, &item.SystemID, &item.SpecJSON, &item.Qty, &item.Amount, &item.Status, &item.AutomationInstanceID, &item.Action, &item.DurationMonths, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.OrderID, &item.PackageID, &item.SystemID, &item.SpecJSON, &item.Qty, &item.Amount, &item.Status, &item.GoodsTypeID, &item.AutomationInstanceID, &item.Action, &item.DurationMonths, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return domain.OrderItem{}, rEnsure(err)
 	}
 	return item, nil
@@ -2686,7 +2806,7 @@ func scanVPSInstance(row scanner) (domain.VPSInstance, error) {
 	var lastEmergency sql.NullTime
 	var panelURL sql.NullString
 	var accessInfo sql.NullString
-	if err := row.Scan(&inst.ID, &inst.UserID, &inst.OrderItemID, &inst.AutomationInstanceID, &inst.Name, &inst.Region, &inst.RegionID, &inst.LineID, &inst.PackageID, &inst.PackageName, &inst.CPU, &inst.MemoryGB, &inst.DiskGB, &inst.BandwidthMB, &inst.PortNum, &inst.MonthlyPrice, &inst.SpecJSON, &inst.SystemID, &inst.Status, &inst.AutomationState, &adminStatus, &expire, &panelURL, &accessInfo, &lastEmergency, &inst.CreatedAt, &inst.UpdatedAt); err != nil {
+	if err := row.Scan(&inst.ID, &inst.UserID, &inst.OrderItemID, &inst.AutomationInstanceID, &inst.GoodsTypeID, &inst.Name, &inst.Region, &inst.RegionID, &inst.LineID, &inst.PackageID, &inst.PackageName, &inst.CPU, &inst.MemoryGB, &inst.DiskGB, &inst.BandwidthMB, &inst.PortNum, &inst.MonthlyPrice, &inst.SpecJSON, &inst.SystemID, &inst.Status, &inst.AutomationState, &adminStatus, &expire, &panelURL, &accessInfo, &lastEmergency, &inst.CreatedAt, &inst.UpdatedAt); err != nil {
 		return domain.VPSInstance{}, rEnsure(err)
 	}
 	if expire.Valid {
@@ -2838,9 +2958,9 @@ func (settingModel) TableName() string { return "settings" }
 
 type pluginInstallationModel struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement;column:id"`
-	Category        string    `gorm:"column:category;uniqueIndex:idx_plugin_installations_cat_id"`
-	PluginID        string    `gorm:"column:plugin_id;uniqueIndex:idx_plugin_installations_cat_id"`
-	InstanceID      string    `gorm:"column:instance_id"`
+	Category        string    `gorm:"column:category;uniqueIndex:idx_plugin_installations_cat_id_instance"`
+	PluginID        string    `gorm:"column:plugin_id;uniqueIndex:idx_plugin_installations_cat_id_instance"`
+	InstanceID      string    `gorm:"column:instance_id;uniqueIndex:idx_plugin_installations_cat_id_instance"`
 	Enabled         int       `gorm:"column:enabled"`
 	SignatureStatus string    `gorm:"column:signature_status"`
 	ConfigCipher    string    `gorm:"column:config_cipher"`

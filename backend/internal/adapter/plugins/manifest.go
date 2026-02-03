@@ -25,6 +25,10 @@ type Manifest struct {
 			Start       bool `json:"start"`
 			QueryResult bool `json:"query_result"`
 		} `json:"kyc,omitempty"`
+		Automation *struct {
+			Features           []string          `json:"features"`
+			NotSupportedReason map[string]string `json:"not_supported_reasons,omitempty"`
+		} `json:"automation,omitempty"`
 	} `json:"capabilities"`
 }
 

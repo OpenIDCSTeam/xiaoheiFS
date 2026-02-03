@@ -22,7 +22,8 @@ type IntegrationService struct {
 	settings   SettingsRepository
 	catalog    CatalogRepository
 	images     SystemImageRepository
-	automation AutomationClient
+	goodsTypes GoodsTypeRepository
+	automation AutomationClientResolver
 	logs       IntegrationLogRepository
 }
 
@@ -32,8 +33,8 @@ type SyncResult struct {
 	Images   int `json:"images"`
 }
 
-func NewIntegrationService(settings SettingsRepository, catalog CatalogRepository, images SystemImageRepository, automation AutomationClient, logs IntegrationLogRepository) *IntegrationService {
-	return &IntegrationService{settings: settings, catalog: catalog, images: images, automation: automation, logs: logs}
+func NewIntegrationService(settings SettingsRepository, catalog CatalogRepository, images SystemImageRepository, goodsTypes GoodsTypeRepository, automation AutomationClientResolver, logs IntegrationLogRepository) *IntegrationService {
+	return &IntegrationService{settings: settings, catalog: catalog, images: images, goodsTypes: goodsTypes, automation: automation, logs: logs}
 }
 
 func (s *IntegrationService) GetAutomationConfig(ctx context.Context) (AutomationConfig, error) {
@@ -73,43 +74,74 @@ func (s *IntegrationService) UpdateAutomationConfig(ctx context.Context, adminID
 }
 
 func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (SyncResult, error) {
-	if s.automation == nil {
+	if s.goodsTypes == nil {
 		return SyncResult{}, ErrInvalidInput
+	}
+	items, err := s.goodsTypes.ListGoodsTypes(ctx)
+	if err != nil || len(items) == 0 {
+		return SyncResult{}, ErrInvalidInput
+	}
+	def := items[0]
+	for _, it := range items[1:] {
+		if it.SortOrder < def.SortOrder || (it.SortOrder == def.SortOrder && it.ID < def.ID) {
+			def = it
+		}
+	}
+	return s.SyncAutomationForGoodsType(ctx, def.ID, mode)
+}
+
+func (s *IntegrationService) SyncAutomationForGoodsType(ctx context.Context, goodsTypeID int64, mode string) (SyncResult, error) {
+	if s.automation == nil || s.catalog == nil || goodsTypeID <= 0 {
+		return SyncResult{}, ErrInvalidInput
+	}
+	cli, err := s.automation.ClientForGoodsType(ctx, goodsTypeID)
+	if err != nil {
+		return SyncResult{}, err
 	}
 	if mode == "" {
 		mode = "merge"
 	}
-	areas, err := s.automation.ListAreas(ctx)
+	areas, err := cli.ListAreas(ctx)
 	if err != nil {
 		s.appendSyncLog(ctx, "area", mode, "failed", err.Error())
 		return SyncResult{}, err
 	}
-	lines, err := s.automation.ListLines(ctx)
+	lines, err := cli.ListLines(ctx)
 	if err != nil {
 		s.appendSyncLog(ctx, "line", mode, "failed", err.Error())
 		return SyncResult{}, err
 	}
-	regions, _ := s.catalog.ListRegions(ctx)
-	planGroups, _ := s.catalog.ListPlanGroups(ctx)
-	packages, _ := s.catalog.ListPackages(ctx)
+
+	allRegions, _ := s.catalog.ListRegions(ctx)
+	allPlanGroups, _ := s.catalog.ListPlanGroups(ctx)
+	allPackages, _ := s.catalog.ListPackages(ctx)
 	knownImages, _ := s.images.ListAllSystemImages(ctx)
 
 	regionByCode := map[string]domain.Region{}
 	regionByName := map[string]domain.Region{}
-	for _, r := range regions {
+	for _, r := range allRegions {
+		if r.GoodsTypeID != goodsTypeID {
+			continue
+		}
 		regionByCode[r.Code] = r
 		if r.Name != "" {
 			regionByName[r.Name] = r
 		}
 	}
 	planByLine := map[int64]domain.PlanGroup{}
-	for _, p := range planGroups {
+	for _, p := range allPlanGroups {
+		if p.GoodsTypeID != goodsTypeID {
+			continue
+		}
 		if p.LineID > 0 {
 			planByLine[p.LineID] = p
 		}
 	}
 	packageByKey := map[string]domain.Package{}
-	for _, pkg := range packages {
+	for _, pkg := range allPackages {
+		if pkg.GoodsTypeID != goodsTypeID {
+			continue
+		}
 		if pkg.ProductID > 0 && pkg.PlanGroupID > 0 {
 			packageByKey[fmt.Sprintf("%d:%d", pkg.PlanGroupID, pkg.ProductID)] = pkg
 		}
@@ -121,10 +153,12 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 		}
 	}
 
-	// ensure default region/plan group if none exist
 	var defaultRegionID int64
-	if len(regions) > 0 {
-		defaultRegionID = regions[0].ID
+	for _, r := range allRegions {
+		if r.GoodsTypeID == goodsTypeID {
+			defaultRegionID = r.ID
+			break
+		}
 	}
 
 	areaNameByID := map[int64]AutomationArea{}
@@ -143,6 +177,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 		region, ok := regionByCode[code]
 		if !ok {
 			if existing, ok := regionByName[areaName]; ok {
+				existing.GoodsTypeID = goodsTypeID
 				existing.Code = code
 				existing.Name = areaName
 				if mode == "override" {
@@ -151,7 +186,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 				_ = s.catalog.UpdateRegion(ctx, existing)
 				region = existing
 			} else {
-				region = domain.Region{Code: code, Name: areaName, Active: area.State == 1}
+				region = domain.Region{GoodsTypeID: goodsTypeID, Code: code, Name: areaName, Active: area.State == 1}
 				_ = s.catalog.CreateRegion(ctx, &region)
 			}
 			regionByCode[code] = region
@@ -159,6 +194,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 				regionByName[region.Name] = region
 			}
 		} else if mode == "override" {
+			region.GoodsTypeID = goodsTypeID
 			region.Name = areaName
 			region.Active = area.State == 1
 			_ = s.catalog.UpdateRegion(ctx, region)
@@ -171,6 +207,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 			defaultRegionID = region.ID
 		}
 		if existing, ok := planByLine[line.ID]; ok {
+			existing.GoodsTypeID = goodsTypeID
 			existing.Name = line.Name
 			existing.RegionID = region.ID
 			if mode == "override" {
@@ -179,6 +216,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 			_ = s.catalog.UpdatePlanGroup(ctx, existing)
 		} else {
 			pg := domain.PlanGroup{
+				GoodsTypeID:       goodsTypeID,
 				RegionID:          region.ID,
 				Name:              line.Name,
 				LineID:            line.ID,
@@ -198,17 +236,18 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 	}
 
 	if defaultRegionID == 0 {
-		region := domain.Region{Code: "default", Name: "Default", Active: true}
+		region := domain.Region{GoodsTypeID: goodsTypeID, Code: "default", Name: "Default", Active: true}
 		_ = s.catalog.CreateRegion(ctx, &region)
 		defaultRegionID = region.ID
 	}
+
 	createdProducts := 0
 	for _, line := range lines {
 		plan, ok := planByLine[line.ID]
 		if !ok || plan.ID == 0 {
 			continue
 		}
-		products, err := s.automation.ListProducts(ctx, line.ID)
+		products, err := cli.ListProducts(ctx, line.ID)
 		if err != nil {
 			s.appendSyncLog(ctx, "product", mode, "failed", err.Error())
 			return SyncResult{}, err
@@ -216,6 +255,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 		for _, product := range products {
 			key := fmt.Sprintf("%d:%d", plan.ID, product.ID)
 			if existing, ok := packageByKey[key]; ok {
+				existing.GoodsTypeID = goodsTypeID
 				existing.Name = product.Name
 				existing.Cores = product.CPU
 				existing.MemoryGB = product.MemoryGB
@@ -235,6 +275,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 					portNum = product.PortNum
 				}
 				pkg := domain.Package{
+					GoodsTypeID:       goodsTypeID,
 					PlanGroupID:       plan.ID,
 					ProductID:         product.ID,
 					Name:              product.Name,
@@ -259,7 +300,7 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 
 	createdImages := 0
 	for _, line := range lines {
-		images, err := s.automation.ListImages(ctx, line.ID)
+		images, err := cli.ListImages(ctx, line.ID)
 		if err != nil {
 			s.appendSyncLog(ctx, "mirror_image", mode, "failed", err.Error())
 			return SyncResult{}, err
@@ -296,10 +337,10 @@ func (s *IntegrationService) SyncAutomation(ctx context.Context, mode string) (S
 		}
 	}
 
-	s.appendSyncLog(ctx, "area", mode, "ok", fmt.Sprintf("areas=%d", len(areas)))
-	s.appendSyncLog(ctx, "line", mode, "ok", fmt.Sprintf("lines=%d", len(lines)))
-	s.appendSyncLog(ctx, "product", mode, "ok", fmt.Sprintf("products=%d", createdProducts))
-	s.appendSyncLog(ctx, "mirror_image", mode, "ok", fmt.Sprintf("images=%d", createdImages))
+	s.appendSyncLog(ctx, "area", mode, "ok", fmt.Sprintf("goods_type_id=%d areas=%d", goodsTypeID, len(areas)))
+	s.appendSyncLog(ctx, "line", mode, "ok", fmt.Sprintf("goods_type_id=%d lines=%d", goodsTypeID, len(lines)))
+	s.appendSyncLog(ctx, "product", mode, "ok", fmt.Sprintf("goods_type_id=%d products=%d", goodsTypeID, createdProducts))
+	s.appendSyncLog(ctx, "mirror_image", mode, "ok", fmt.Sprintf("goods_type_id=%d images=%d", goodsTypeID, createdImages))
 
 	return SyncResult{Lines: createdLines, Products: createdProducts, Images: createdImages}, nil
 }

@@ -221,6 +221,12 @@ type fakeLifecycleAutomationClient struct {
 	DeleteCalls []int64
 }
 
+func (f *fakeLifecycleAutomationClient) ClientForGoodsType(ctx context.Context, goodsTypeID int64) (AutomationClient, error) {
+	_ = ctx
+	_ = goodsTypeID
+	return f, nil
+}
+
 func (f *fakeLifecycleAutomationClient) CreateHost(ctx context.Context, req AutomationCreateHostRequest) (AutomationCreateHostResult, error) {
 	return AutomationCreateHostResult{}, nil
 }

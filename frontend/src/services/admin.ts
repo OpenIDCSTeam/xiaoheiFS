@@ -40,7 +40,9 @@ import type {
   DebugStatusResponse,
   DebugLogsResponse,
   PluginListItem,
-  PluginDiscoverItem
+  PluginDiscoverItem,
+  PluginPaymentMethodItem,
+  GoodsType
 } from "./types";
 
 export const adminLogin = (payload: Record<string, unknown>) => http.post("/admin/api/v1/auth/login", payload);
@@ -89,7 +91,7 @@ export const emergencyRenewAdminVps = (id: number | string, payload: Record<stri
 export const updateAdminVpsExpire = (id: number | string, payload: Record<string, unknown>) =>
   http.patch(`/admin/api/v1/vps/${id}/expire-at`, payload);
 
-export const listRegions = () => http.get<ApiList<Region>>("/admin/api/v1/regions");
+export const listRegions = (params?: Record<string, unknown>) => http.get<ApiList<Region>>("/admin/api/v1/regions", { params });
 export const createRegion = (payload: Record<string, unknown>) => http.post("/admin/api/v1/regions", payload);
 export const updateRegion = (id: number | string, payload: Record<string, unknown>) =>
   http.patch(`/admin/api/v1/regions/${id}`, payload);
@@ -97,14 +99,14 @@ export const deleteRegion = (id: number | string) => http.delete(`/admin/api/v1/
 export const bulkDeleteRegions = (ids: Array<number | string>) =>
   http.post("/admin/api/v1/regions/bulk-delete", { ids });
 
-export const listLines = () => http.get<ApiList<Line>>("/admin/api/v1/lines");
+export const listLines = (params?: Record<string, unknown>) => http.get<ApiList<Line>>("/admin/api/v1/lines", { params });
 export const createLine = (payload: Record<string, unknown>) => http.post("/admin/api/v1/lines", payload);
 export const updateLine = (id: number | string, payload: Record<string, unknown>) => http.patch(`/admin/api/v1/lines/${id}`, payload);
 export const deleteLine = (id: number | string) => http.delete(`/admin/api/v1/lines/${id}`);
 export const bulkDeleteLines = (ids: Array<number | string>) =>
   http.post("/admin/api/v1/lines/bulk-delete", { ids });
 
-export const listPlanGroups = () => http.get<ApiList<Line>>("/admin/api/v1/plan-groups");
+export const listPlanGroups = (params?: Record<string, unknown>) => http.get<ApiList<Line>>("/admin/api/v1/plan-groups", { params });
 export const createPlanGroup = (payload: Record<string, unknown>) => http.post("/admin/api/v1/plan-groups", payload);
 export const updatePlanGroup = (id: number | string, payload: Record<string, unknown>) =>
   http.patch(`/admin/api/v1/plan-groups/${id}`, payload);
@@ -303,6 +305,21 @@ export const disableAdminPlugin = (category: string, pluginId: string) =>
 export const uninstallAdminPlugin = (category: string, pluginId: string) =>
   http.delete<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}`);
 
+export const createAdminPluginInstance = (category: string, pluginId: string, payload: { instance_id?: string; config_json?: string }) =>
+  http.post<{ ok?: boolean; plugin?: Record<string, unknown> }>(`/admin/api/v1/plugins/${category}/${pluginId}/instances`, payload || {});
+
+export const enableAdminPluginInstance = (category: string, pluginId: string, instanceId: string) =>
+  http.post<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/${instanceId}/enable`);
+
+export const disableAdminPluginInstance = (category: string, pluginId: string, instanceId: string) =>
+  http.post<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/${instanceId}/disable`);
+
+export const deleteAdminPluginInstance = (category: string, pluginId: string, instanceId: string) =>
+  http.delete<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/${instanceId}`);
+
+export const deleteAdminPluginFiles = (category: string, pluginId: string) =>
+  http.delete<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/files`);
+
 export const importAdminPluginFromDisk = (category: string, pluginId: string, adminPassword?: string) =>
   http.post<{ ok?: boolean; plugin?: Record<string, unknown> }>(`/admin/api/v1/plugins/${category}/${pluginId}/import`, {
     admin_password: adminPassword || ""
@@ -316,3 +333,32 @@ export const getAdminPluginConfig = (category: string, pluginId: string) =>
 
 export const updateAdminPluginConfig = (category: string, pluginId: string, configJson: string) =>
   http.put<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/config`, { config_json: configJson });
+
+export const getAdminPluginInstanceConfigSchema = (category: string, pluginId: string, instanceId: string) =>
+  http.get<{ json_schema?: string; ui_schema?: string }>(`/admin/api/v1/plugins/${category}/${pluginId}/${instanceId}/config/schema`);
+
+export const getAdminPluginInstanceConfig = (category: string, pluginId: string, instanceId: string) =>
+  http.get<{ config_json?: string }>(`/admin/api/v1/plugins/${category}/${pluginId}/${instanceId}/config`);
+
+export const updateAdminPluginInstanceConfig = (category: string, pluginId: string, instanceId: string, configJson: string) =>
+  http.put<{ ok?: boolean }>(`/admin/api/v1/plugins/${category}/${pluginId}/${instanceId}/config`, { config_json: configJson });
+
+export const listAdminPluginPaymentMethods = (params: { category?: string; plugin_id: string; instance_id?: string }) =>
+  http.get<{ items?: PluginPaymentMethodItem[] }>("/admin/api/v1/plugins/payment-methods", { params });
+
+export const updateAdminPluginPaymentMethod = (payload: {
+  category?: string;
+  plugin_id: string;
+  instance_id?: string;
+  method: string;
+  enabled: boolean;
+}) => http.patch<{ ok?: boolean }>("/admin/api/v1/plugins/payment-methods", payload);
+
+// Goods types
+export const listGoodsTypes = () => http.get<{ items?: GoodsType[] }>("/admin/api/v1/goods-types");
+export const createGoodsType = (payload: Record<string, unknown>) => http.post<GoodsType>("/admin/api/v1/goods-types", payload);
+export const updateGoodsType = (id: number | string, payload: Record<string, unknown>) =>
+  http.put(`/admin/api/v1/goods-types/${id}`, payload);
+export const deleteGoodsType = (id: number | string) => http.delete(`/admin/api/v1/goods-types/${id}`);
+export const syncGoodsTypeAutomation = (id: number | string, mode?: string) =>
+  http.post(`/admin/api/v1/goods-types/${id}/sync-automation`, null, { params: { mode: mode || "merge" } });

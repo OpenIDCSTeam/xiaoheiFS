@@ -1,0 +1,15 @@
+{
+  "title": "Alipay Open",
+  "type": "object",
+  "properties": {
+    "app_id": { "type": "string", "title": "App ID" },
+    "app_private_key": { "type": "string", "title": "App Private Key (PEM/Base64)", "format": "password" },
+    "alipay_public_key": { "type": "string", "title": "Alipay Public Key (PEM/Base64)", "format": "password" },
+    "seller_id": { "type": "string", "title": "Seller ID" },
+    "is_prod": { "type": "boolean", "title": "Production", "default": true },
+    "default_notify_url": { "type": "string", "title": "Default Notify URL" },
+    "default_return_url": { "type": "string", "title": "Default Return URL" },
+    "timeout_sec": { "type": "integer", "title": "Request Timeout (sec)", "default": 10, "minimum": 1, "maximum": 60 }
+  },
+  "required": ["app_id","app_private_key","alipay_public_key"]
+}

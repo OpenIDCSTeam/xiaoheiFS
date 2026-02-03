@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 func migrateSQLite(db *sql.DB) error {
@@ -25,9 +26,33 @@ func migrateSQLite(db *sql.DB) error {
 			expires_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);`,
+		`CREATE TABLE IF NOT EXISTS verification_codes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			channel TEXT NOT NULL,
+			receiver TEXT NOT NULL,
+			purpose TEXT NOT NULL,
+			code_hash TEXT NOT NULL,
+			expires_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS goods_types (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			code TEXT,
+			name TEXT NOT NULL,
+			active INTEGER NOT NULL DEFAULT 1,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			automation_category TEXT NOT NULL DEFAULT 'automation',
+			automation_plugin_id TEXT NOT NULL DEFAULT '',
+			automation_instance_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_goods_types_code_unique ON goods_types(code) WHERE code IS NOT NULL AND code != '';`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_goods_types_automation_unique ON goods_types(automation_category, automation_plugin_id, automation_instance_id);`,
 		`CREATE TABLE IF NOT EXISTS regions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			code TEXT NOT NULL UNIQUE,
+			goods_type_id INTEGER NOT NULL DEFAULT 0,
+			code TEXT NOT NULL,
 			name TEXT NOT NULL,
 			active INTEGER NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -35,6 +60,7 @@ func migrateSQLite(db *sql.DB) error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS plan_groups (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			goods_type_id INTEGER NOT NULL DEFAULT 0,
 			region_id INTEGER NOT NULL,
 			name TEXT NOT NULL,
 			line_id INTEGER NOT NULL DEFAULT 0,
@@ -64,6 +90,7 @@ func migrateSQLite(db *sql.DB) error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS packages (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			goods_type_id INTEGER NOT NULL DEFAULT 0,
 			plan_group_id INTEGER NOT NULL,
 			product_id INTEGER NOT NULL DEFAULT 0,
 			name TEXT NOT NULL,
@@ -135,6 +162,7 @@ func migrateSQLite(db *sql.DB) error {
 			qty INTEGER NOT NULL DEFAULT 1,
 			amount INTEGER NOT NULL,
 			status TEXT NOT NULL,
+			goods_type_id INTEGER NOT NULL DEFAULT 0,
 			automation_instance_id TEXT,
 			action TEXT NOT NULL DEFAULT 'create',
 			duration_months INTEGER NOT NULL DEFAULT 1,
@@ -147,6 +175,7 @@ func migrateSQLite(db *sql.DB) error {
 			user_id INTEGER NOT NULL,
 			order_item_id INTEGER NOT NULL,
 			automation_instance_id TEXT NOT NULL,
+			goods_type_id INTEGER NOT NULL DEFAULT 0,
 			name TEXT NOT NULL,
 			region TEXT,
 			region_id INTEGER NOT NULL DEFAULT 0,
@@ -218,7 +247,21 @@ func migrateSQLite(db *sql.DB) error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_installations_cat_id ON plugin_installations(category, plugin_id);`,
+		`DROP INDEX IF EXISTS idx_plugin_installations_cat_id;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_installations_cat_id_instance ON plugin_installations(category, plugin_id, instance_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_plugin_installations_cat_plugin ON plugin_installations(category, plugin_id);`,
+		`CREATE TABLE IF NOT EXISTS plugin_payment_methods (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			category TEXT NOT NULL,
+			plugin_id TEXT NOT NULL,
+			instance_id TEXT NOT NULL,
+			method TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_payment_methods_unique ON plugin_payment_methods(category, plugin_id, instance_id, method);`,
+		`CREATE INDEX IF NOT EXISTS idx_plugin_payment_methods_instance ON plugin_payment_methods(category, plugin_id, instance_id);`,
 		`CREATE TABLE IF NOT EXISTS email_templates (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,
@@ -488,12 +531,14 @@ func migrateSQLite(db *sql.DB) error {
 			FOREIGN KEY(user_id) REFERENCES users(id)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_plan_groups_region ON plan_groups(region_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_verification_codes_receiver ON verification_codes(channel, receiver, purpose);`,
+		`CREATE INDEX IF NOT EXISTS idx_verification_codes_expires ON verification_codes(expires_at);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);`,
 		`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_plan_groups_line ON plan_groups(line_id);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_groups_line_unique ON plan_groups(line_id) WHERE line_id > 0;`,
+		`DROP INDEX IF EXISTS idx_plan_groups_line_unique;`,
 		`CREATE INDEX IF NOT EXISTS idx_packages_plan_group ON packages(plan_group_id);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_product_unique ON packages(plan_group_id, product_id) WHERE product_id > 0;`,
+		`DROP INDEX IF EXISTS idx_packages_product_unique;`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_system_images_image_unique ON system_images(image_id) WHERE image_id > 0;`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_line_system_images_unique ON line_system_images(line_id, system_image_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_line_system_images_line ON line_system_images(line_id);`,
@@ -524,6 +569,30 @@ func migrateSQLite(db *sql.DB) error {
 		if _, err := db.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	_ = normalizePluginInstanceIDs(db)
+	defaultGoodsTypeID, _ := ensureDefaultGoodsType(db)
+	if err := rebuildRegionsForGoodsTypes(db, defaultGoodsTypeID); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "plan_groups", "goods_type_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "packages", "goods_type_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "order_items", "goods_type_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "vps_instances", "goods_type_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// Backfill: existing data belongs to the default goods type.
+	if defaultGoodsTypeID > 0 {
+		_, _ = db.Exec(`UPDATE plan_groups SET goods_type_id = ? WHERE goods_type_id = 0`, defaultGoodsTypeID)
+		_, _ = db.Exec(`UPDATE packages SET goods_type_id = ? WHERE goods_type_id = 0`, defaultGoodsTypeID)
+		_, _ = db.Exec(`UPDATE order_items SET goods_type_id = ? WHERE goods_type_id = 0`, defaultGoodsTypeID)
+		_, _ = db.Exec(`UPDATE vps_instances SET goods_type_id = ? WHERE goods_type_id = 0`, defaultGoodsTypeID)
 	}
 
 	if err := addColumnIfMissing(db, "plan_groups", "line_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -595,6 +664,13 @@ func migrateSQLite(db *sql.DB) error {
 			return err
 		}
 	}
+
+	// Create indexes that depend on newly added columns at the end,
+	// so upgrades from older schemas won't fail with "no such column".
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_plan_groups_goods_type ON plan_groups(goods_type_id);`)
+	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_groups_gt_line_unique ON plan_groups(goods_type_id, line_id) WHERE line_id > 0;`)
+	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_gt_product_unique ON packages(goods_type_id, plan_group_id, product_id) WHERE product_id > 0;`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_packages_goods_type ON packages(goods_type_id);`)
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idem ON orders(user_id, idempotency_key)`); err != nil {
 		return err
 	}
@@ -604,6 +680,35 @@ func migrateSQLite(db *sql.DB) error {
 	_ = backfillVPSInstanceSnapshot(db)
 	_ = migrateDefaultPermissionGroups(db)
 
+	return nil
+}
+
+func normalizePluginInstanceIDs(db *sql.DB) error {
+	rows, err := db.Query(`SELECT id, category, plugin_id, instance_id FROM plugin_installations`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var category, pluginID, instanceID string
+		if err := rows.Scan(&id, &category, &pluginID, &instanceID); err != nil {
+			return err
+		}
+		category = strings.TrimSpace(category)
+		pluginID = strings.TrimSpace(pluginID)
+		instanceID = strings.TrimSpace(instanceID)
+		if category == "" || pluginID == "" || instanceID == "" {
+			continue
+		}
+		// Legacy instance_id format was: "<category>-<plugin_id>-<random>".
+		prefix := category + "-" + pluginID + "-"
+		if strings.HasPrefix(instanceID, prefix) {
+			if _, err := db.Exec(`UPDATE plugin_installations SET instance_id = 'default' WHERE id = ?`, id); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -651,6 +756,76 @@ func addColumnIfMissing(db *sql.DB, table string, column string, ddl string) err
 	}
 	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, ddl))
 	return err
+}
+
+func ensureDefaultGoodsType(db *sql.DB) (int64, error) {
+	var id int64
+	if err := db.QueryRow(`SELECT id FROM goods_types ORDER BY id LIMIT 1`).Scan(&id); err == nil && id > 0 {
+		return id, nil
+	}
+	res, err := db.Exec(`INSERT INTO goods_types(code,name,active,sort_order,automation_category,automation_plugin_id,automation_instance_id) VALUES (?,?,?,?,?,?,?)`,
+		"lightboat_vps", "轻舟VPS", 1, 0, "automation", "lightboat", "default")
+	if err != nil {
+		// Another concurrent instance may have inserted; try again.
+		if err := db.QueryRow(`SELECT id FROM goods_types ORDER BY id LIMIT 1`).Scan(&id); err == nil && id > 0 {
+			return id, nil
+		}
+		return 0, err
+	}
+	id, _ = res.LastInsertId()
+	return id, nil
+}
+
+func rebuildRegionsForGoodsTypes(db *sql.DB, defaultGoodsTypeID int64) error {
+	var createSQL string
+	_ = db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'regions'`).Scan(&createSQL)
+	needsRebuild := true
+	if strings.Contains(strings.ToLower(createSQL), "goods_type_id") && !strings.Contains(strings.ToLower(createSQL), "code text not null unique") {
+		needsRebuild = false
+	}
+	if !needsRebuild {
+		// ensure goods_type_id column exists and backfilled
+		if err := addColumnIfMissing(db, "regions", "goods_type_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if defaultGoodsTypeID > 0 {
+			_, _ = db.Exec(`UPDATE regions SET goods_type_id = ? WHERE goods_type_id = 0`, defaultGoodsTypeID)
+		}
+		return nil
+	}
+
+	_, _ = db.Exec(`PRAGMA foreign_keys = OFF`)
+	defer func() { _, _ = db.Exec(`PRAGMA foreign_keys = ON`) }()
+
+	// Rename old table and create a new one without the global UNIQUE(code) constraint.
+	_, err := db.Exec(`ALTER TABLE regions RENAME TO regions_old`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE TABLE regions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			goods_type_id INTEGER NOT NULL DEFAULT 0,
+			code TEXT NOT NULL,
+			name TEXT NOT NULL,
+			active INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`)
+	if err != nil {
+		return err
+	}
+	if defaultGoodsTypeID <= 0 {
+		defaultGoodsTypeID = 1
+	}
+	_, err = db.Exec(`INSERT INTO regions(id, goods_type_id, code, name, active, created_at, updated_at)
+		SELECT id, ?, code, name, active, created_at, updated_at FROM regions_old`, defaultGoodsTypeID)
+	if err != nil {
+		return err
+	}
+	_, _ = db.Exec(`DROP TABLE regions_old`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_regions_goods_type ON regions(goods_type_id);`)
+	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_regions_gt_code_unique ON regions(goods_type_id, code);`)
+	return nil
 }
 
 type vpsSpecSnapshot struct {

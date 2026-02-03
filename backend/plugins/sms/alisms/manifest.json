@@ -1,8 +1,8 @@
 {
   "plugin_id": "alisms",
-  "name": "Aliyun SMS (Mock)",
-  "version": "0.1.0",
-  "description": "Mock SMS plugin. Replace with real Aliyun SMS SDK calls.",
+  "name": "Aliyun SMS",
+  "version": "1.0.0",
+  "description": "Aliyun SMS via official Dysmsapi SDK.",
   "binaries": {
     "windows_amd64": "bin/windows_amd64/plugin.exe",
     "linux_amd64": "bin/linux_amd64/plugin",

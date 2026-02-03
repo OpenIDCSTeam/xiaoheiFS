@@ -101,6 +101,7 @@ const router = createRouter({
         { path: "catalog", name: "admin-catalog", component: () => import("@/pages/admin/Catalog.vue") },
         { path: "systems", name: "admin-systems", component: () => import("@/pages/admin/Systems.vue") },
         { path: "settings/site", name: "admin-settings-site", component: () => import("@/pages/admin/settings/Site.vue") },
+        { path: "settings/auth", name: "admin-settings-auth", component: () => import("@/pages/admin/settings/Auth.vue") },
         { path: "settings/email", name: "admin-settings-email", component: () => import("@/pages/admin/settings/Email.vue") },
         { path: "settings/apikey", name: "admin-settings-apikey", component: () => import("@/pages/admin/settings/ApiKey.vue") },
         { path: "settings/webhook", name: "admin-settings-webhook", component: () => import("@/pages/admin/settings/Webhook.vue") },

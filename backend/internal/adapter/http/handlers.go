@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -38,11 +39,14 @@ import (
 	"xiaoheiplay/internal/pkg/money"
 	"xiaoheiplay/internal/pkg/permissions"
 	"xiaoheiplay/internal/usecase"
+	pluginv1 "xiaoheiplay/plugin/v1"
 )
 
 var (
-	htmlPolicy       = bluemonday.UGCPolicy()
-	forgotPwdLimiter = newRateLimiter()
+	htmlPolicy          = bluemonday.UGCPolicy()
+	forgotPwdLimiter    = newRateLimiter()
+	loginLimiter        = newRateLimiter()
+	registerCodeLimiter = newRateLimiter()
 )
 
 func sanitizeHTML(raw string) string {
@@ -55,6 +59,7 @@ func sanitizeHTML(raw string) string {
 type Handler struct {
 	authSvc       *usecase.AuthService
 	catalogSvc    *usecase.CatalogService
+	goodsTypes    *usecase.GoodsTypeService
 	cartSvc       *usecase.CartService
 	orderSvc      *usecase.OrderService
 	vpsSvc        *usecase.VPSService
@@ -88,13 +93,37 @@ type Handler struct {
 	pluginDir     string
 	pluginPass    string
 	pluginMgr     *plugins.Manager
+	pluginPayMeth usecase.PluginPaymentMethodRepository
 	taskSvc       *usecase.ScheduledTaskService
 }
 
-func NewHandler(authSvc *usecase.AuthService, catalogSvc *usecase.CatalogService, cartSvc *usecase.CartService, orderSvc *usecase.OrderService, vpsSvc *usecase.VPSService, adminSvc *usecase.AdminService, adminVPS *usecase.AdminVPSService, integration *usecase.IntegrationService, reportSvc *usecase.ReportService, cmsSvc *usecase.CMSService, ticketSvc *usecase.TicketService, walletSvc *usecase.WalletService, walletOrder *usecase.WalletOrderService, paymentSvc *usecase.PaymentService, messageSvc *usecase.MessageCenterService, statusSvc *usecase.ServerStatusService, realnameSvc *usecase.RealNameService, orderItems usecase.OrderItemRepository, users usecase.UserRepository, orderRepo usecase.OrderRepository, vpsRepo usecase.VPSRepository, payments usecase.PaymentRepository, eventsRepo usecase.EventRepository, automationLogs usecase.AutomationLogRepository, settings usecase.SettingsRepository, permissions usecase.PermissionRepository, uploads usecase.UploadRepository, broker *sse.Broker, jwtSecret string, automation usecase.AutomationClient, passwordReset *usecase.PasswordResetService, permissionSvc *usecase.PermissionService, taskSvc *usecase.ScheduledTaskService) *Handler {
+type authSettings struct {
+	RegisterEnabled        bool
+	RegisterRequiredFields []string
+	PasswordMinLen         int
+	PasswordRequireUpper   bool
+	PasswordRequireLower   bool
+	PasswordRequireNumber  bool
+	PasswordRequireSymbol  bool
+	RegisterVerifyType     string // none|email|sms
+	RegisterVerifyTTL      time.Duration
+	RegisterCaptchaEnabled bool
+	RegisterEmailSubject   string
+	RegisterEmailBody      string
+	RegisterSMSPluginID    string
+	RegisterSMSInstanceID  string
+	RegisterSMSTemplateID  string
+	LoginCaptchaEnabled    bool
+	LoginRateLimitEnabled  bool
+	LoginRateLimitWindow   time.Duration
+	LoginRateLimitMax      int
+}
+
+func NewHandler(authSvc *usecase.AuthService, catalogSvc *usecase.CatalogService, goodsTypes *usecase.GoodsTypeService, cartSvc *usecase.CartService, orderSvc *usecase.OrderService, vpsSvc *usecase.VPSService, adminSvc *usecase.AdminService, adminVPS *usecase.AdminVPSService, integration *usecase.IntegrationService, reportSvc *usecase.ReportService, cmsSvc *usecase.CMSService, ticketSvc *usecase.TicketService, walletSvc *usecase.WalletService, walletOrder *usecase.WalletOrderService, paymentSvc *usecase.PaymentService, messageSvc *usecase.MessageCenterService, statusSvc *usecase.ServerStatusService, realnameSvc *usecase.RealNameService, orderItems usecase.OrderItemRepository, users usecase.UserRepository, orderRepo usecase.OrderRepository, vpsRepo usecase.VPSRepository, payments usecase.PaymentRepository, eventsRepo usecase.EventRepository, automationLogs usecase.AutomationLogRepository, settings usecase.SettingsRepository, permissions usecase.PermissionRepository, uploads usecase.UploadRepository, broker *sse.Broker, jwtSecret string, automation usecase.AutomationClient, passwordReset *usecase.PasswordResetService, permissionSvc *usecase.PermissionService, taskSvc *usecase.ScheduledTaskService) *Handler {
 	return &Handler{
 		authSvc:       authSvc,
 		catalogSvc:    catalogSvc,
+		goodsTypes:    goodsTypes,
 		cartSvc:       cartSvc,
 		orderSvc:      orderSvc,
 		vpsSvc:        vpsSvc,
@@ -129,6 +158,116 @@ func NewHandler(authSvc *usecase.AuthService, catalogSvc *usecase.CatalogService
 	}
 }
 
+func (h *Handler) loadAuthSettings(ctx context.Context) authSettings {
+	get := func(key string) string {
+		if h.settings == nil {
+			return ""
+		}
+		s, err := h.settings.GetSetting(ctx, key)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(s.ValueJSON)
+	}
+	getBool := func(key string, def bool) bool {
+		val := strings.ToLower(strings.TrimSpace(get(key)))
+		if val == "" {
+			return def
+		}
+		return val == "true" || val == "1" || val == "yes"
+	}
+	getInt := func(key string, def int) int {
+		val := strings.TrimSpace(get(key))
+		if val == "" {
+			return def
+		}
+		if n, err := strconv.Atoi(val); err == nil {
+			return n
+		}
+		return def
+	}
+	getString := func(key, def string) string {
+		val := strings.TrimSpace(get(key))
+		if val == "" {
+			return def
+		}
+		return val
+	}
+	getStringSlice := func(key string, def []string) []string {
+		raw := get(key)
+		if raw == "" {
+			return def
+		}
+		var out []string
+		if err := json.Unmarshal([]byte(raw), &out); err == nil {
+			return out
+		}
+		return def
+	}
+
+	verifyType := strings.ToLower(getString("auth_register_verify_type", "none"))
+	if verifyType != "email" && verifyType != "sms" {
+		verifyType = "none"
+	}
+
+	return authSettings{
+		RegisterEnabled:        getBool("auth_register_enabled", true),
+		RegisterRequiredFields: getStringSlice("auth_register_required_fields", []string{"username", "email", "password"}),
+		PasswordMinLen:         getInt("auth_password_min_len", 6),
+		PasswordRequireUpper:   getBool("auth_password_require_upper", false),
+		PasswordRequireLower:   getBool("auth_password_require_lower", false),
+		PasswordRequireNumber:  getBool("auth_password_require_number", false),
+		PasswordRequireSymbol:  getBool("auth_password_require_symbol", false),
+		RegisterVerifyType:     verifyType,
+		RegisterVerifyTTL:      time.Duration(getInt("auth_register_verify_ttl_sec", 600)) * time.Second,
+		RegisterCaptchaEnabled: getBool("auth_register_captcha_enabled", true),
+		RegisterEmailSubject:   getString("auth_register_email_subject", "Your verification code"),
+		RegisterEmailBody:      getString("auth_register_email_body", "Your verification code is: {{code}}"),
+		RegisterSMSPluginID:    getString("auth_register_sms_plugin_id", ""),
+		RegisterSMSInstanceID:  getString("auth_register_sms_instance_id", "default"),
+		RegisterSMSTemplateID:  getString("auth_register_sms_template_id", ""),
+		LoginCaptchaEnabled:    getBool("auth_login_captcha_enabled", false),
+		LoginRateLimitEnabled:  getBool("auth_login_rate_limit_enabled", true),
+		LoginRateLimitWindow:   time.Duration(getInt("auth_login_rate_limit_window_sec", 300)) * time.Second,
+		LoginRateLimitMax:      getInt("auth_login_rate_limit_max_attempts", 5),
+	}
+}
+
+func validatePasswordBySettings(password string, s authSettings) error {
+	if strings.TrimSpace(password) == "" {
+		return usecase.ErrInvalidInput
+	}
+	if s.PasswordMinLen > 0 && len(password) < s.PasswordMinLen {
+		return errors.New("password too short")
+	}
+	var hasUpper, hasLower, hasNumber, hasSymbol bool
+	for _, r := range password {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasNumber = true
+		default:
+			hasSymbol = true
+		}
+	}
+	if s.PasswordRequireUpper && !hasUpper {
+		return errors.New("password requires uppercase")
+	}
+	if s.PasswordRequireLower && !hasLower {
+		return errors.New("password requires lowercase")
+	}
+	if s.PasswordRequireNumber && !hasNumber {
+		return errors.New("password requires number")
+	}
+	if s.PasswordRequireSymbol && !hasSymbol {
+		return errors.New("password requires symbol")
+	}
+	return nil
+}
+
 func (h *Handler) SetPaymentPluginConfig(dir, password string) {
 	h.pluginDir = strings.TrimSpace(dir)
 	h.pluginPass = strings.TrimSpace(password)
@@ -136,6 +275,10 @@ func (h *Handler) SetPaymentPluginConfig(dir, password string) {
 
 func (h *Handler) SetPluginManager(mgr *plugins.Manager) {
 	h.pluginMgr = mgr
+}
+
+func (h *Handler) SetPluginPaymentMethodRepo(repo usecase.PluginPaymentMethodRepository) {
+	h.pluginPayMeth = repo
 }
 
 func (h *Handler) Captcha(c *gin.Context) {
@@ -167,19 +310,81 @@ func (h *Handler) Register(c *gin.Context) {
 		Password    string `json:"password"`
 		CaptchaID   string `json:"captcha_id"`
 		CaptchaCode string `json:"captcha_code"`
+		VerifyCode  string `json:"verify_code"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
+	settings := h.loadAuthSettings(c)
+	if !settings.RegisterEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"error": "registration disabled"})
+		return
+	}
+	required := map[string]bool{
+		"username": true,
+		"email":    true,
+		"password": true,
+	}
+	for _, f := range settings.RegisterRequiredFields {
+		required[strings.ToLower(strings.TrimSpace(f))] = true
+	}
+	if required["username"] && strings.TrimSpace(payload.Username) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "username required"})
+		return
+	}
+	if required["email"] && strings.TrimSpace(payload.Email) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email required"})
+		return
+	}
+	if required["phone"] && strings.TrimSpace(payload.Phone) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "phone required"})
+		return
+	}
+	if required["qq"] && strings.TrimSpace(payload.QQ) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "qq required"})
+		return
+	}
+	if err := validatePasswordBySettings(payload.Password, settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if settings.RegisterVerifyType != "none" {
+		code := strings.TrimSpace(payload.VerifyCode)
+		if code == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "verification code required"})
+			return
+		}
+		switch settings.RegisterVerifyType {
+		case "email":
+			if strings.TrimSpace(payload.Email) == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "email required"})
+				return
+			}
+			if err := h.authSvc.VerifyVerificationCode(c, "email", strings.TrimSpace(payload.Email), "register", code); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid verification code"})
+				return
+			}
+		case "sms":
+			if strings.TrimSpace(payload.Phone) == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "phone required"})
+				return
+			}
+			if err := h.authSvc.VerifyVerificationCode(c, "sms", strings.TrimSpace(payload.Phone), "register", code); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid verification code"})
+				return
+			}
+		}
+	}
 	user, err := h.authSvc.Register(c, usecase.RegisterInput{
-		Username:    payload.Username,
-		Email:       payload.Email,
-		QQ:          payload.QQ,
-		Phone:       payload.Phone,
-		Password:    payload.Password,
-		CaptchaID:   payload.CaptchaID,
-		CaptchaCode: payload.CaptchaCode,
+		Username:        payload.Username,
+		Email:           payload.Email,
+		QQ:              payload.QQ,
+		Phone:           payload.Phone,
+		Password:        payload.Password,
+		CaptchaID:       payload.CaptchaID,
+		CaptchaCode:     payload.CaptchaCode,
+		CaptchaRequired: settings.RegisterCaptchaEnabled,
 	})
 	if err != nil {
 		status := http.StatusBadRequest
@@ -194,12 +399,28 @@ func (h *Handler) Register(c *gin.Context) {
 
 func (h *Handler) Login(c *gin.Context) {
 	var payload struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		CaptchaID   string `json:"captcha_id"`
+		CaptchaCode string `json:"captcha_code"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
+	}
+	settings := h.loadAuthSettings(c)
+	if settings.LoginRateLimitEnabled {
+		key := "login:" + strings.ToLower(strings.TrimSpace(payload.Username)) + ":" + strings.TrimSpace(c.ClientIP())
+		if !loginLimiter.Allow(key, settings.LoginRateLimitMax, settings.LoginRateLimitWindow) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many attempts"})
+			return
+		}
+	}
+	if settings.LoginCaptchaEnabled {
+		if err := h.authSvc.VerifyCaptcha(c, payload.CaptchaID, payload.CaptchaCode); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "captcha failed"})
+			return
+		}
 	}
 	user, err := h.authSvc.Login(c, payload.Username, payload.Password)
 	if err != nil {
@@ -221,6 +442,126 @@ func (h *Handler) Login(c *gin.Context) {
 
 func (h *Handler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AuthSettings(c *gin.Context) {
+	settings := h.loadAuthSettings(c)
+	c.JSON(http.StatusOK, gin.H{
+		"register_enabled":         settings.RegisterEnabled,
+		"register_required_fields": settings.RegisterRequiredFields,
+		"password_min_len":         settings.PasswordMinLen,
+		"password_require_upper":   settings.PasswordRequireUpper,
+		"password_require_lower":   settings.PasswordRequireLower,
+		"password_require_number":  settings.PasswordRequireNumber,
+		"password_require_symbol":  settings.PasswordRequireSymbol,
+		"register_verify_type":     settings.RegisterVerifyType,
+		"register_captcha_enabled": settings.RegisterCaptchaEnabled,
+		"login_captcha_enabled":    settings.LoginCaptchaEnabled,
+	})
+}
+
+func (h *Handler) RegisterCode(c *gin.Context) {
+	var payload struct {
+		Email       string `json:"email"`
+		Phone       string `json:"phone"`
+		CaptchaID   string `json:"captcha_id"`
+		CaptchaCode string `json:"captcha_code"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	settings := h.loadAuthSettings(c)
+	if !settings.RegisterEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"error": "registration disabled"})
+		return
+	}
+	if settings.RegisterCaptchaEnabled {
+		if err := h.authSvc.VerifyCaptcha(c, payload.CaptchaID, payload.CaptchaCode); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "captcha failed"})
+			return
+		}
+	}
+
+	switch settings.RegisterVerifyType {
+	case "email":
+		emailVal := strings.TrimSpace(payload.Email)
+		if emailVal == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email required"})
+			return
+		}
+		if !registerCodeLimiter.Allow("register_code:email:"+strings.ToLower(emailVal), 3, 10*time.Minute) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many requests"})
+			return
+		}
+		code, err := h.authSvc.CreateVerificationCode(c, "email", emailVal, "register", settings.RegisterVerifyTTL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		subject := strings.TrimSpace(settings.RegisterEmailSubject)
+		if subject == "" {
+			subject = "Your verification code"
+		}
+		body := strings.ReplaceAll(settings.RegisterEmailBody, "{{code}}", code)
+		sender := email.NewSender(h.settings)
+		if err := sender.Send(c, emailVal, subject, body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email send failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	case "sms":
+		phoneVal := strings.TrimSpace(payload.Phone)
+		if phoneVal == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "phone required"})
+			return
+		}
+		if settings.RegisterSMSPluginID == "" || h.pluginMgr == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sms plugin not configured"})
+			return
+		}
+		if !registerCodeLimiter.Allow("register_code:sms:"+phoneVal, 3, 10*time.Minute) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many requests"})
+			return
+		}
+		code, err := h.authSvc.CreateVerificationCode(c, "sms", phoneVal, "register", settings.RegisterVerifyTTL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := h.pluginMgr.EnsureRunning(c, "sms", settings.RegisterSMSPluginID, settings.RegisterSMSInstanceID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		client, ok := h.pluginMgr.GetSMSClient("sms", settings.RegisterSMSPluginID, settings.RegisterSMSInstanceID)
+		if !ok || client == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sms plugin not running"})
+			return
+		}
+		req := &pluginv1.SendSmsRequest{
+			TemplateId: settings.RegisterSMSTemplateID,
+			Vars: map[string]string{
+				"code": code,
+			},
+			Phones: []string{phoneVal},
+		}
+		if settings.RegisterSMSTemplateID == "" {
+			req.Content = "Your verification code is: " + code
+		}
+		cctx, cancel := context.WithTimeout(c, 10*time.Second)
+		defer cancel()
+		resp, err := client.Send(cctx, req)
+		if err != nil || resp == nil || !resp.Ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sms send failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "verification not enabled"})
+		return
+	}
 }
 
 func (h *Handler) Refresh(c *gin.Context) {
@@ -337,10 +678,34 @@ func (h *Handler) RealNameVerify(c *gin.Context) {
 }
 
 func (h *Handler) Catalog(c *gin.Context) {
+	goodsTypeID, _ := strconv.ParseInt(c.Query("goods_type_id"), 10, 64)
 	regions, plans, packages, images, cycles, err := h.catalogSvc.Catalog(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "catalog error"})
 		return
+	}
+	if goodsTypeID > 0 {
+		filteredRegions := make([]domain.Region, 0, len(regions))
+		for _, r := range regions {
+			if r.GoodsTypeID == goodsTypeID {
+				filteredRegions = append(filteredRegions, r)
+			}
+		}
+		regions = filteredRegions
+		filteredPlans := make([]domain.PlanGroup, 0, len(plans))
+		for _, p := range plans {
+			if p.GoodsTypeID == goodsTypeID {
+				filteredPlans = append(filteredPlans, p)
+			}
+		}
+		plans = filteredPlans
+		filteredPackages := make([]domain.Package, 0, len(packages))
+		for _, pkg := range packages {
+			if pkg.GoodsTypeID == goodsTypeID {
+				filteredPackages = append(filteredPackages, pkg)
+			}
+		}
+		packages = filteredPackages
 	}
 	plans = filterVisiblePlanGroups(plans)
 	packages = filterVisiblePackages(packages, plans)
@@ -349,13 +714,82 @@ func (h *Handler) Catalog(c *gin.Context) {
 	} else {
 		images = filterEnabledSystemImages(images, plans)
 	}
+	var goodsTypes []domain.GoodsType
+	if h.goodsTypes != nil {
+		items, _ := h.goodsTypes.List(c)
+		for _, it := range items {
+			if it.Active {
+				goodsTypes = append(goodsTypes, it)
+			}
+		}
+		sort.SliceStable(goodsTypes, func(i, j int) bool {
+			if goodsTypes[i].SortOrder != goodsTypes[j].SortOrder {
+				return goodsTypes[i].SortOrder < goodsTypes[j].SortOrder
+			}
+			return goodsTypes[i].ID < goodsTypes[j].ID
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{
+		"goods_types":    goodsTypes,
 		"regions":        toRegionDTOs(regions),
 		"plan_groups":    toPlanGroupDTOs(plans),
 		"packages":       toPackageDTOs(packages),
 		"system_images":  toSystemImageDTOs(images),
 		"billing_cycles": toBillingCycleDTOs(cycles),
 	})
+}
+
+func (h *Handler) GoodsTypes(c *gin.Context) {
+	if h.goodsTypes == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	items, err := h.goodsTypes.List(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
+		return
+	}
+	active := make([]domain.GoodsType, 0, len(items))
+	for _, it := range items {
+		if it.Active {
+			active = append(active, it)
+		}
+	}
+	sort.SliceStable(active, func(i, j int) bool {
+		if active[i].SortOrder != active[j].SortOrder {
+			return active[i].SortOrder < active[j].SortOrder
+		}
+		return active[i].ID < active[j].ID
+	})
+	c.JSON(http.StatusOK, gin.H{"items": active})
+}
+
+func (h *Handler) defaultGoodsTypeID(ctx context.Context) int64 {
+	if h.goodsTypes == nil {
+		return 0
+	}
+	items, err := h.goodsTypes.List(ctx)
+	if err != nil || len(items) == 0 {
+		return 0
+	}
+	var best domain.GoodsType
+	for _, it := range items {
+		if !it.Active {
+			continue
+		}
+		if best.ID == 0 || it.SortOrder < best.SortOrder || (it.SortOrder == best.SortOrder && it.ID < best.ID) {
+			best = it
+		}
+	}
+	if best.ID > 0 {
+		return best.ID
+	}
+	for _, it := range items {
+		if best.ID == 0 || it.SortOrder < best.SortOrder || (it.SortOrder == best.SortOrder && it.ID < best.ID) {
+			best = it
+		}
+	}
+	return best.ID
 }
 
 func (h *Handler) SystemImages(c *gin.Context) {
@@ -381,12 +815,22 @@ func (h *Handler) SystemImages(c *gin.Context) {
 
 func (h *Handler) PlanGroups(c *gin.Context) {
 	regionID, _ := strconv.ParseInt(c.Query("region_id"), 10, 64)
+	goodsTypeID, _ := strconv.ParseInt(c.Query("goods_type_id"), 10, 64)
 	items, err := h.catalogSvc.ListPlanGroups(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
 		return
 	}
 	items = filterVisiblePlanGroups(items)
+	if goodsTypeID > 0 {
+		filtered := make([]domain.PlanGroup, 0, len(items))
+		for _, item := range items {
+			if item.GoodsTypeID == goodsTypeID {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
 	if regionID > 0 {
 		filtered := make([]domain.PlanGroup, 0, len(items))
 		for _, item := range items {
@@ -401,6 +845,7 @@ func (h *Handler) PlanGroups(c *gin.Context) {
 
 func (h *Handler) Packages(c *gin.Context) {
 	planGroupID, _ := strconv.ParseInt(c.Query("plan_group_id"), 10, 64)
+	goodsTypeID, _ := strconv.ParseInt(c.Query("goods_type_id"), 10, 64)
 	items, err := h.catalogSvc.ListPackages(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
@@ -408,6 +853,15 @@ func (h *Handler) Packages(c *gin.Context) {
 	}
 	visiblePlans := listVisiblePlanGroups(h.catalogSvc, c)
 	items = filterVisiblePackages(items, visiblePlans)
+	if goodsTypeID > 0 {
+		filtered := make([]domain.Package, 0, len(items))
+		for _, item := range items {
+			if item.GoodsTypeID == goodsTypeID {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
 	if planGroupID > 0 {
 		filtered := make([]domain.Package, 0, len(items))
 		for _, item := range items {
@@ -642,9 +1096,10 @@ func (h *Handler) OrderPay(c *gin.Context) {
 	}
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	var payload struct {
-		Method    string `json:"method"`
-		ReturnURL string `json:"return_url"`
-		NotifyURL string `json:"notify_url"`
+		Method    string            `json:"method"`
+		ReturnURL string            `json:"return_url"`
+		NotifyURL string            `json:"notify_url"`
+		Extra     map[string]string `json:"extra"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
@@ -654,6 +1109,7 @@ func (h *Handler) OrderPay(c *gin.Context) {
 		Method:    payload.Method,
 		ReturnURL: payload.ReturnURL,
 		NotifyURL: payload.NotifyURL,
+		Extra:     payload.Extra,
 	})
 	if err != nil {
 		status := http.StatusBadRequest
@@ -697,7 +1153,11 @@ func (h *Handler) PaymentNotify(c *gin.Context) {
 		return
 	}
 	if result.AckBody != "" {
-		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(result.AckBody))
+		ct := "text/plain; charset=utf-8"
+		if s := strings.TrimSpace(result.AckBody); strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[") {
+			ct = "application/json; charset=utf-8"
+		}
+		c.Data(http.StatusOK, ct, []byte(result.AckBody))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "trade_no": result.TradeNo})
@@ -1169,13 +1629,21 @@ func (h *Handler) VPSSnapshots(c *gin.Context) {
 	case http.MethodGet:
 		items, err := h.vpsSvc.ListSnapshots(c, inst)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": items})
 	case http.MethodPost:
 		if err := h.vpsSvc.CreateSnapshot(c, inst); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1193,7 +1661,11 @@ func (h *Handler) VPSSnapshotDelete(c *gin.Context) {
 		return
 	}
 	if err := h.vpsSvc.DeleteSnapshot(c, inst, snapshotID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1208,7 +1680,11 @@ func (h *Handler) VPSSnapshotRestore(c *gin.Context) {
 		return
 	}
 	if err := h.vpsSvc.RestoreSnapshot(c, inst, snapshotID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1225,13 +1701,21 @@ func (h *Handler) VPSBackups(c *gin.Context) {
 	case http.MethodGet:
 		items, err := h.vpsSvc.ListBackups(c, inst)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": items})
 	case http.MethodPost:
 		if err := h.vpsSvc.CreateBackup(c, inst); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1249,7 +1733,11 @@ func (h *Handler) VPSBackupDelete(c *gin.Context) {
 		return
 	}
 	if err := h.vpsSvc.DeleteBackup(c, inst, backupID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1264,7 +1752,11 @@ func (h *Handler) VPSBackupRestore(c *gin.Context) {
 		return
 	}
 	if err := h.vpsSvc.RestoreBackup(c, inst, backupID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1281,7 +1773,11 @@ func (h *Handler) VPSFirewallRules(c *gin.Context) {
 	case http.MethodGet:
 		items, err := h.vpsSvc.ListFirewallRules(c, inst)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": items})
@@ -1309,7 +1805,11 @@ func (h *Handler) VPSFirewallRules(c *gin.Context) {
 			return
 		}
 		if err := h.vpsSvc.AddFirewallRule(c, inst, req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1327,7 +1827,11 @@ func (h *Handler) VPSFirewallDelete(c *gin.Context) {
 		return
 	}
 	if err := h.vpsSvc.DeleteFirewallRule(c, inst, ruleID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1344,7 +1848,11 @@ func (h *Handler) VPSPortMappings(c *gin.Context) {
 	case http.MethodGet:
 		items, err := h.vpsSvc.ListPortMappings(c, inst)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": items})
@@ -1370,7 +1878,11 @@ func (h *Handler) VPSPortMappings(c *gin.Context) {
 			Dport: dport,
 		}
 		if err := h.vpsSvc.AddPortMapping(c, inst, req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, usecase.ErrNotSupported) {
+				status = http.StatusNotImplemented
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1411,7 +1923,11 @@ func (h *Handler) VPSPortCandidates(c *gin.Context) {
 	keywords := strings.TrimSpace(c.Query("keywords"))
 	items, err := h.vpsSvc.FindPortCandidates(c, inst, keywords)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -1426,7 +1942,11 @@ func (h *Handler) VPSPortMappingDelete(c *gin.Context) {
 		return
 	}
 	if err := h.vpsSvc.DeletePortMapping(c, inst, mappingID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, usecase.ErrNotSupported) {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -2198,6 +2718,132 @@ func (h *Handler) AdminPluginsDiscover(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h *Handler) AdminPluginPaymentMethodsList(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	if h.pluginPayMeth == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payment method repo missing"})
+		return
+	}
+	category := strings.TrimSpace(c.Query("category"))
+	pluginID := strings.TrimSpace(c.Query("plugin_id"))
+	instanceID := strings.TrimSpace(c.Query("instance_id"))
+	if category == "" {
+		category = "payment"
+	}
+	if instanceID == "" {
+		instanceID = plugins.DefaultInstanceID
+	}
+	if category == "" || pluginID == "" || instanceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "category/plugin_id/instance_id required"})
+		return
+	}
+
+	items, err := h.pluginMgr.List(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var supported []string
+	for _, it := range items {
+		if it.Category != category || it.PluginID != pluginID || it.InstanceID != instanceID {
+			continue
+		}
+		if it.Capabilities.Capabilities.Payment == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not a payment plugin instance"})
+			return
+		}
+		supported = it.Capabilities.Capabilities.Payment.Methods
+		break
+	}
+	if len(supported) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "plugin instance not found"})
+		return
+	}
+
+	overrides, _ := h.pluginPayMeth.ListPluginPaymentMethods(c, category, pluginID, instanceID)
+	enabledMap := map[string]bool{}
+	for _, ov := range overrides {
+		enabledMap[ov.Method] = ov.Enabled
+	}
+
+	type itemDTO struct {
+		Method  string `json:"method"`
+		Enabled bool   `json:"enabled"`
+	}
+	out := make([]itemDTO, 0, len(supported))
+	for _, m := range supported {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		enabled, ok := enabledMap[m]
+		if !ok {
+			enabled = true
+		}
+		out = append(out, itemDTO{Method: m, Enabled: enabled})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Method < out[j].Method })
+	c.JSON(http.StatusOK, gin.H{"items": out})
+}
+
+func (h *Handler) AdminPluginPaymentMethodsUpdate(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	if h.pluginPayMeth == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payment method repo missing"})
+		return
+	}
+	var payload struct {
+		Category   string `json:"category"`
+		PluginID   string `json:"plugin_id"`
+		InstanceID string `json:"instance_id"`
+		Method     string `json:"method"`
+		Enabled    *bool  `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	category := strings.TrimSpace(payload.Category)
+	pluginID := strings.TrimSpace(payload.PluginID)
+	instanceID := strings.TrimSpace(payload.InstanceID)
+	method := strings.TrimSpace(payload.Method)
+	if category == "" {
+		category = "payment"
+	}
+	if instanceID == "" {
+		instanceID = plugins.DefaultInstanceID
+	}
+	if category == "" || pluginID == "" || instanceID == "" || method == "" || payload.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "category/plugin_id/instance_id/method/enabled required"})
+		return
+	}
+
+	enabled := *payload.Enabled
+	if err := h.pluginPayMeth.UpsertPluginPaymentMethod(c, &domain.PluginPaymentMethod{
+		Category:   category,
+		PluginID:   pluginID,
+		InstanceID: instanceID,
+		Method:     method,
+		Enabled:    enabled,
+	}); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.payment_method.update", "plugin", category+"/"+pluginID+"/"+instanceID, map[string]any{
+			"method":  method,
+			"enabled": enabled,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *Handler) AdminPluginInstall(c *gin.Context) {
 	if h.pluginMgr == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
@@ -2305,12 +2951,12 @@ func (h *Handler) AdminPluginEnable(c *gin.Context) {
 	}
 	category := c.Param("category")
 	pluginID := c.Param("plugin_id")
-	if err := h.pluginMgr.Enable(c, category, pluginID); err != nil {
+	if err := h.pluginMgr.EnableInstance(c, category, pluginID, plugins.DefaultInstanceID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if h.adminSvc != nil {
-		h.adminSvc.Audit(c, getUserID(c), "plugin.enable", "plugin", category+"/"+pluginID, map[string]any{})
+		h.adminSvc.Audit(c, getUserID(c), "plugin.enable", "plugin", category+"/"+pluginID+"/"+plugins.DefaultInstanceID, map[string]any{})
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -2322,12 +2968,12 @@ func (h *Handler) AdminPluginDisable(c *gin.Context) {
 	}
 	category := c.Param("category")
 	pluginID := c.Param("plugin_id")
-	if err := h.pluginMgr.Disable(c, category, pluginID); err != nil {
+	if err := h.pluginMgr.DisableInstance(c, category, pluginID, plugins.DefaultInstanceID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if h.adminSvc != nil {
-		h.adminSvc.Audit(c, getUserID(c), "plugin.disable", "plugin", category+"/"+pluginID, map[string]any{})
+		h.adminSvc.Audit(c, getUserID(c), "plugin.disable", "plugin", category+"/"+pluginID+"/"+plugins.DefaultInstanceID, map[string]any{})
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -2339,12 +2985,12 @@ func (h *Handler) AdminPluginUninstall(c *gin.Context) {
 	}
 	category := c.Param("category")
 	pluginID := c.Param("plugin_id")
-	if err := h.pluginMgr.Uninstall(c, category, pluginID); err != nil {
+	if err := h.pluginMgr.DeleteInstance(c, category, pluginID, plugins.DefaultInstanceID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if h.adminSvc != nil {
-		h.adminSvc.Audit(c, getUserID(c), "plugin.uninstall", "plugin", category+"/"+pluginID, map[string]any{})
+		h.adminSvc.Audit(c, getUserID(c), "plugin.uninstall", "plugin", category+"/"+pluginID+"/"+plugins.DefaultInstanceID, map[string]any{})
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -2356,7 +3002,7 @@ func (h *Handler) AdminPluginConfigSchema(c *gin.Context) {
 	}
 	category := c.Param("category")
 	pluginID := c.Param("plugin_id")
-	jsonSchema, uiSchema, err := h.pluginMgr.GetConfigSchema(c, category, pluginID)
+	jsonSchema, uiSchema, err := h.pluginMgr.GetConfigSchemaInstance(c, category, pluginID, plugins.DefaultInstanceID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -2371,7 +3017,7 @@ func (h *Handler) AdminPluginConfigGet(c *gin.Context) {
 	}
 	category := c.Param("category")
 	pluginID := c.Param("plugin_id")
-	cfg, err := h.pluginMgr.GetConfig(c, category, pluginID)
+	cfg, err := h.pluginMgr.GetConfigInstance(c, category, pluginID, plugins.DefaultInstanceID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -2393,12 +3039,171 @@ func (h *Handler) AdminPluginConfigUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	if err := h.pluginMgr.UpdateConfig(c, category, pluginID, payload.ConfigJSON); err != nil {
+	if err := h.pluginMgr.UpdateConfigInstance(c, category, pluginID, plugins.DefaultInstanceID, payload.ConfigJSON); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if h.adminSvc != nil {
-		h.adminSvc.Audit(c, getUserID(c), "plugin.config_update", "plugin", category+"/"+pluginID, map[string]any{})
+		h.adminSvc.Audit(c, getUserID(c), "plugin.config_update", "plugin", category+"/"+pluginID+"/"+plugins.DefaultInstanceID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginInstanceCreate(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	var payload struct {
+		InstanceID string `json:"instance_id"`
+		ConfigJSON string `json:"config_json"`
+	}
+	_ = c.ShouldBindJSON(&payload)
+
+	inst, err := h.pluginMgr.CreateInstance(c, category, pluginID, payload.InstanceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(payload.ConfigJSON) != "" {
+		if err := h.pluginMgr.UpdateConfigInstance(c, category, pluginID, inst.InstanceID, payload.ConfigJSON); err != nil {
+			_ = h.pluginMgr.DeleteInstance(c, category, pluginID, inst.InstanceID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.instance_create", "plugin", category+"/"+pluginID+"/"+inst.InstanceID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "plugin": inst})
+}
+
+func (h *Handler) AdminPluginInstanceEnable(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	instanceID := c.Param("instance_id")
+	if err := h.pluginMgr.EnableInstance(c, category, pluginID, instanceID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.enable", "plugin", category+"/"+pluginID+"/"+instanceID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginInstanceDisable(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	instanceID := c.Param("instance_id")
+	if err := h.pluginMgr.DisableInstance(c, category, pluginID, instanceID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.disable", "plugin", category+"/"+pluginID+"/"+instanceID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginInstanceDelete(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	instanceID := c.Param("instance_id")
+	if err := h.pluginMgr.DeleteInstance(c, category, pluginID, instanceID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.instance_delete", "plugin", category+"/"+pluginID+"/"+instanceID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginInstanceConfigSchema(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	instanceID := c.Param("instance_id")
+	jsonSchema, uiSchema, err := h.pluginMgr.GetConfigSchemaInstance(c, category, pluginID, instanceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"json_schema": jsonSchema, "ui_schema": uiSchema})
+}
+
+func (h *Handler) AdminPluginInstanceConfigGet(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	instanceID := c.Param("instance_id")
+	cfg, err := h.pluginMgr.GetConfigInstance(c, category, pluginID, instanceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"config_json": cfg})
+}
+
+func (h *Handler) AdminPluginInstanceConfigUpdate(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	instanceID := c.Param("instance_id")
+	var payload struct {
+		ConfigJSON string `json:"config_json"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if err := h.pluginMgr.UpdateConfigInstance(c, category, pluginID, instanceID, payload.ConfigJSON); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.config_update", "plugin", category+"/"+pluginID+"/"+instanceID, map[string]any{})
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPluginDeleteFiles(c *gin.Context) {
+	if h.pluginMgr == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plugins disabled"})
+		return
+	}
+	category := c.Param("category")
+	pluginID := c.Param("plugin_id")
+	if err := h.pluginMgr.DeletePluginFiles(c, category, pluginID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.adminSvc != nil {
+		h.adminSvc.Audit(c, getUserID(c), "plugin.delete_files", "plugin", category+"/"+pluginID, map[string]any{})
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -3219,10 +4024,20 @@ func (h *Handler) AdminSystemImages(c *gin.Context) {
 }
 
 func (h *Handler) AdminRegions(c *gin.Context) {
+	goodsTypeID, _ := strconv.ParseInt(c.Query("goods_type_id"), 10, 64)
 	items, err := h.catalogSvc.ListRegions(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
 		return
+	}
+	if goodsTypeID > 0 {
+		filtered := make([]domain.Region, 0, len(items))
+		for _, item := range items {
+			if item.GoodsTypeID == goodsTypeID {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 	c.JSON(http.StatusOK, gin.H{"items": toRegionDTOs(items)})
 }
@@ -3234,6 +4049,13 @@ func (h *Handler) AdminRegionCreate(c *gin.Context) {
 		return
 	}
 	region := regionDTOToDomain(payload)
+	if region.GoodsTypeID <= 0 {
+		region.GoodsTypeID = h.defaultGoodsTypeID(c)
+	}
+	if region.GoodsTypeID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "goods_type_id required"})
+		return
+	}
 	if err := h.catalogSvc.CreateRegion(c, &region); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -3250,6 +4072,11 @@ func (h *Handler) AdminRegionUpdate(c *gin.Context) {
 	}
 	payload.ID = id
 	region := regionDTOToDomain(payload)
+	if region.GoodsTypeID <= 0 {
+		if current, err := h.catalogSvc.GetRegion(c, id); err == nil && current.GoodsTypeID > 0 {
+			region.GoodsTypeID = current.GoodsTypeID
+		}
+	}
 	if err := h.catalogSvc.UpdateRegion(c, region); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -3288,10 +4115,20 @@ func (h *Handler) AdminRegionBulkDelete(c *gin.Context) {
 }
 
 func (h *Handler) AdminPlanGroups(c *gin.Context) {
+	goodsTypeID, _ := strconv.ParseInt(c.Query("goods_type_id"), 10, 64)
 	items, err := h.catalogSvc.ListPlanGroups(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
 		return
+	}
+	if goodsTypeID > 0 {
+		filtered := make([]domain.PlanGroup, 0, len(items))
+		for _, item := range items {
+			if item.GoodsTypeID == goodsTypeID {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 	c.JSON(http.StatusOK, gin.H{"items": toPlanGroupDTOs(items)})
 }
@@ -3307,6 +4144,17 @@ func (h *Handler) AdminPlanGroupCreate(c *gin.Context) {
 		return
 	}
 	plan := planGroupDTOToDomain(payload)
+	if plan.RegionID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid region_id"})
+		return
+	}
+	if region, err := h.catalogSvc.GetRegion(c, plan.RegionID); err == nil {
+		plan.GoodsTypeID = region.GoodsTypeID
+	}
+	if plan.GoodsTypeID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "goods_type_id required"})
+		return
+	}
 	if err := h.catalogSvc.CreatePlanGroup(c, &plan); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -3356,6 +4204,9 @@ func (h *Handler) AdminPlanGroupUpdate(c *gin.Context) {
 	}
 	if payload.RegionID != nil {
 		plan.RegionID = *payload.RegionID
+		if region, err := h.catalogSvc.GetRegion(c, plan.RegionID); err == nil && region.GoodsTypeID > 0 {
+			plan.GoodsTypeID = region.GoodsTypeID
+		}
 	}
 	if payload.Name != nil {
 		plan.Name = *payload.Name
@@ -3499,10 +4350,20 @@ func (h *Handler) AdminLineDelete(c *gin.Context) {
 
 func (h *Handler) AdminPackages(c *gin.Context) {
 	planGroupID, _ := strconv.ParseInt(c.Query("plan_group_id"), 10, 64)
+	goodsTypeID, _ := strconv.ParseInt(c.Query("goods_type_id"), 10, 64)
 	items, err := h.catalogSvc.ListPackages(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
 		return
+	}
+	if goodsTypeID > 0 {
+		filtered := make([]domain.Package, 0, len(items))
+		for _, item := range items {
+			if item.GoodsTypeID == goodsTypeID {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 	if planGroupID > 0 {
 		filtered := make([]domain.Package, 0, len(items))
@@ -3527,6 +4388,17 @@ func (h *Handler) AdminPackageCreate(c *gin.Context) {
 		return
 	}
 	pkg := packageDTOToDomain(payload)
+	if pkg.PlanGroupID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan_group_id"})
+		return
+	}
+	if plan, err := h.catalogSvc.GetPlanGroup(c, pkg.PlanGroupID); err == nil {
+		pkg.GoodsTypeID = plan.GoodsTypeID
+	}
+	if pkg.GoodsTypeID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "goods_type_id required"})
+		return
+	}
 	if err := h.catalogSvc.CreatePackage(c, &pkg); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -3571,6 +4443,9 @@ func (h *Handler) AdminPackageUpdate(c *gin.Context) {
 			return
 		}
 		pkg.PlanGroupID = *payload.PlanGroupID
+		if plan, err := h.catalogSvc.GetPlanGroup(c, pkg.PlanGroupID); err == nil && plan.GoodsTypeID > 0 {
+			pkg.GoodsTypeID = plan.GoodsTypeID
+		}
 	}
 	if payload.ProductID != nil {
 		pkg.ProductID = *payload.ProductID
@@ -4065,6 +4940,127 @@ func (h *Handler) AdminAutomationSyncLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": toIntegrationSyncLogDTOs(items), "total": total})
+}
+
+func (h *Handler) AdminGoodsTypes(c *gin.Context) {
+	if h.goodsTypes == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	items, err := h.goodsTypes.List(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "list error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) AdminGoodsTypeCreate(c *gin.Context) {
+	if h.goodsTypes == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	var payload struct {
+		Code               string `json:"code"`
+		Name               string `json:"name"`
+		Active             bool   `json:"active"`
+		SortOrder          int    `json:"sort_order"`
+		AutomationPluginID string `json:"automation_plugin_id"`
+		AutomationInstance string `json:"automation_instance_id"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	gt := &domain.GoodsType{
+		Code:                 strings.TrimSpace(payload.Code),
+		Name:                 strings.TrimSpace(payload.Name),
+		Active:               payload.Active,
+		SortOrder:            payload.SortOrder,
+		AutomationCategory:   "automation",
+		AutomationPluginID:   strings.TrimSpace(payload.AutomationPluginID),
+		AutomationInstanceID: strings.TrimSpace(payload.AutomationInstance),
+	}
+	if err := h.goodsTypes.Create(c, gt); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gt)
+}
+
+func (h *Handler) AdminGoodsTypeUpdate(c *gin.Context) {
+	if h.goodsTypes == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var payload struct {
+		Code               string `json:"code"`
+		Name               string `json:"name"`
+		Active             bool   `json:"active"`
+		SortOrder          int    `json:"sort_order"`
+		AutomationPluginID string `json:"automation_plugin_id"`
+		AutomationInstance string `json:"automation_instance_id"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	gt := domain.GoodsType{
+		ID:                   id,
+		Code:                 strings.TrimSpace(payload.Code),
+		Name:                 strings.TrimSpace(payload.Name),
+		Active:               payload.Active,
+		SortOrder:            payload.SortOrder,
+		AutomationCategory:   "automation",
+		AutomationPluginID:   strings.TrimSpace(payload.AutomationPluginID),
+		AutomationInstanceID: strings.TrimSpace(payload.AutomationInstance),
+	}
+	if err := h.goodsTypes.Update(c, gt); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminGoodsTypeDelete(c *gin.Context) {
+	if h.goodsTypes == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.goodsTypes.Delete(c, id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminGoodsTypeSyncAutomation(c *gin.Context) {
+	if h.integration == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	mode := c.Query("mode")
+	result, err := h.integration.SyncAutomationForGoodsType(c, id, mode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *Handler) AdminRobotConfig(c *gin.Context) {

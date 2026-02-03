@@ -1,0 +1,18 @@
+{
+  "plugin_id": "lightboat",
+  "name": "Lightboat Automation (Built-in)",
+  "version": "0.1.0",
+  "description": "Built-in Lightboat/Qingzhou automation plugin (catalog + lifecycle + port/backup/snapshot/firewall).",
+  "binaries": {
+    "windows_amd64": "bin/windows_amd64/plugin.exe",
+    "linux_amd64": "bin/linux_amd64/plugin",
+    "darwin_amd64": "bin/darwin_amd64/plugin",
+    "darwin_arm64": "bin/darwin_arm64/plugin"
+  },
+  "capabilities": {
+    "automation": {
+      "features": ["catalog_sync", "lifecycle", "port_mapping", "backup", "snapshot", "firewall"]
+    }
+  }
+}
+

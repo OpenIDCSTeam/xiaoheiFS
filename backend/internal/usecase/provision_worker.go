@@ -89,7 +89,12 @@ func (s *OrderService) handleProvisionJob(ctx context.Context, job domain.Provis
 		s.finishProvisionJob(ctx, job, "order stopped")
 		return
 	}
-	info, err := s.automation.GetHostInfo(jobCtx, job.HostID)
+	cli, err := s.client(jobCtx, item.GoodsTypeID)
+	if err != nil {
+		s.retryProvisionJob(ctx, job, err.Error())
+		return
+	}
+	info, err := cli.GetHostInfo(jobCtx, job.HostID)
 	if err != nil {
 		s.retryProvisionJob(ctx, job, err.Error())
 		return

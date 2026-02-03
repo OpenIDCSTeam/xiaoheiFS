@@ -41,6 +41,8 @@ func NewServer(handler *Handler, middleware *Middleware) *Server {
 		public.POST("/install", handler.InstallRun)
 
 		public.GET("/captcha", handler.Captcha)
+		public.GET("/auth/settings", handler.AuthSettings)
+		public.POST("/auth/register/code", handler.RegisterCode)
 		public.POST("/auth/register", handler.Register)
 		public.POST("/auth/login", handler.Login)
 		public.Any("/payments/notify/:provider", handler.PaymentNotify)
@@ -58,6 +60,7 @@ func NewServer(handler *Handler, middleware *Middleware) *Server {
 		user.GET("/realname/status", handler.RealNameStatus)
 		user.POST("/realname/verify", handler.RealNameVerify)
 		user.GET("/dashboard", handler.Dashboard)
+		user.GET("/goods-types", handler.GoodsTypes)
 		user.GET("/catalog", handler.Catalog)
 		user.GET("/plan-groups", handler.PlanGroups)
 		user.GET("/packages", handler.Packages)
@@ -152,10 +155,20 @@ func NewServer(handler *Handler, middleware *Middleware) *Server {
 		admin.GET("/payments/providers", handler.AdminPaymentProviders)
 		admin.PATCH("/payments/providers/:key", handler.AdminPaymentProviderUpdate)
 		admin.POST("/plugins/payment/upload", handler.AdminPaymentPluginUpload)
+		admin.GET("/plugins/payment-methods", handler.AdminPluginPaymentMethodsList)
+		admin.PATCH("/plugins/payment-methods", handler.AdminPluginPaymentMethodsUpdate)
 		admin.GET("/plugins", handler.AdminPluginsList)
 		admin.GET("/plugins/discover", handler.AdminPluginsDiscover)
 		admin.POST("/plugins/install", handler.AdminPluginInstall)
 		admin.POST("/plugins/:category/:plugin_id/import", handler.AdminPluginImportFromDisk)
+		admin.POST("/plugins/:category/:plugin_id/instances", handler.AdminPluginInstanceCreate)
+		admin.POST("/plugins/:category/:plugin_id/:instance_id/enable", handler.AdminPluginInstanceEnable)
+		admin.POST("/plugins/:category/:plugin_id/:instance_id/disable", handler.AdminPluginInstanceDisable)
+		admin.DELETE("/plugins/:category/:plugin_id/:instance_id", handler.AdminPluginInstanceDelete)
+		admin.GET("/plugins/:category/:plugin_id/:instance_id/config/schema", handler.AdminPluginInstanceConfigSchema)
+		admin.GET("/plugins/:category/:plugin_id/:instance_id/config", handler.AdminPluginInstanceConfigGet)
+		admin.PUT("/plugins/:category/:plugin_id/:instance_id/config", handler.AdminPluginInstanceConfigUpdate)
+		admin.DELETE("/plugins/:category/:plugin_id/files", handler.AdminPluginDeleteFiles)
 		admin.POST("/plugins/:category/:plugin_id/enable", handler.AdminPluginEnable)
 		admin.POST("/plugins/:category/:plugin_id/disable", handler.AdminPluginDisable)
 		admin.DELETE("/plugins/:category/:plugin_id", handler.AdminPluginUninstall)
@@ -226,6 +239,12 @@ func NewServer(handler *Handler, middleware *Middleware) *Server {
 		admin.PATCH("/integrations/automation", handler.AdminAutomationConfigUpdate)
 		admin.POST("/integrations/automation/sync", handler.AdminAutomationSync)
 		admin.GET("/integrations/automation/sync-logs", handler.AdminAutomationSyncLogs)
+
+		admin.GET("/goods-types", handler.AdminGoodsTypes)
+		admin.POST("/goods-types", handler.AdminGoodsTypeCreate)
+		admin.POST("/goods-types/:id/sync-automation", handler.AdminGoodsTypeSyncAutomation)
+		admin.PUT("/goods-types/:id", handler.AdminGoodsTypeUpdate)
+		admin.DELETE("/goods-types/:id", handler.AdminGoodsTypeDelete)
 		admin.GET("/integrations/robot", handler.AdminRobotConfig)
 		admin.PATCH("/integrations/robot", handler.AdminRobotConfigUpdate)
 		admin.POST("/integrations/robot/test", handler.AdminRobotTest)
@@ -405,6 +424,6 @@ func spaIndexFallbackHandler(staticDir string, excludedPrefixes []string) gin.Ha
 	}
 }
 
-func NewHandlerWithServices(auth *usecase.AuthService, catalog *usecase.CatalogService, cart *usecase.CartService, orders *usecase.OrderService, vps *usecase.VPSService, admin *usecase.AdminService, adminVPS *usecase.AdminVPSService, integration *usecase.IntegrationService, reportSvc *usecase.ReportService, cmsSvc *usecase.CMSService, ticketSvc *usecase.TicketService, walletSvc *usecase.WalletService, walletOrders *usecase.WalletOrderService, paymentSvc *usecase.PaymentService, messageSvc *usecase.MessageCenterService, statusSvc *usecase.ServerStatusService, realnameSvc *usecase.RealNameService, orderItems usecase.OrderItemRepository, users usecase.UserRepository, orderRepo usecase.OrderRepository, vpsRepo usecase.VPSRepository, payments usecase.PaymentRepository, events usecase.EventRepository, automationLogs usecase.AutomationLogRepository, settings usecase.SettingsRepository, permissions usecase.PermissionRepository, uploads usecase.UploadRepository, broker *sse.Broker, jwtSecret string, automation usecase.AutomationClient, passwordReset *usecase.PasswordResetService, permissionSvc *usecase.PermissionService, taskSvc *usecase.ScheduledTaskService) *Handler {
-	return NewHandler(auth, catalog, cart, orders, vps, admin, adminVPS, integration, reportSvc, cmsSvc, ticketSvc, walletSvc, walletOrders, paymentSvc, messageSvc, statusSvc, realnameSvc, orderItems, users, orderRepo, vpsRepo, payments, events, automationLogs, settings, permissions, uploads, broker, jwtSecret, automation, passwordReset, permissionSvc, taskSvc)
+func NewHandlerWithServices(auth *usecase.AuthService, catalog *usecase.CatalogService, goodsTypes *usecase.GoodsTypeService, cart *usecase.CartService, orders *usecase.OrderService, vps *usecase.VPSService, admin *usecase.AdminService, adminVPS *usecase.AdminVPSService, integration *usecase.IntegrationService, reportSvc *usecase.ReportService, cmsSvc *usecase.CMSService, ticketSvc *usecase.TicketService, walletSvc *usecase.WalletService, walletOrders *usecase.WalletOrderService, paymentSvc *usecase.PaymentService, messageSvc *usecase.MessageCenterService, statusSvc *usecase.ServerStatusService, realnameSvc *usecase.RealNameService, orderItems usecase.OrderItemRepository, users usecase.UserRepository, orderRepo usecase.OrderRepository, vpsRepo usecase.VPSRepository, payments usecase.PaymentRepository, events usecase.EventRepository, automationLogs usecase.AutomationLogRepository, settings usecase.SettingsRepository, permissions usecase.PermissionRepository, uploads usecase.UploadRepository, broker *sse.Broker, jwtSecret string, automation usecase.AutomationClient, passwordReset *usecase.PasswordResetService, permissionSvc *usecase.PermissionService, taskSvc *usecase.ScheduledTaskService) *Handler {
+	return NewHandler(auth, catalog, goodsTypes, cart, orders, vps, admin, adminVPS, integration, reportSvc, cmsSvc, ticketSvc, walletSvc, walletOrders, paymentSvc, messageSvc, statusSvc, realnameSvc, orderItems, users, orderRepo, vpsRepo, payments, events, automationLogs, settings, permissions, uploads, broker, jwtSecret, automation, passwordReset, permissionSvc, taskSvc)
 }

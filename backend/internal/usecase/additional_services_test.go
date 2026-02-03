@@ -51,7 +51,7 @@ func TestCartServiceRemoveClearAndIntegrationLogs(t *testing.T) {
 		t.Fatalf("clear cart: %v", err)
 	}
 
-	svc := usecase.NewIntegrationService(repo, repo, repo, nil, repo)
+	svc := usecase.NewIntegrationService(repo, repo, repo, repo, nil, repo)
 	if _, _, err := svc.ListSyncLogs(ctx, "", 10, 0); err != nil {
 		t.Fatalf("list sync logs: %v", err)
 	}

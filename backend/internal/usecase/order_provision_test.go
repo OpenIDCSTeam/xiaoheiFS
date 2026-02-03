@@ -38,7 +38,8 @@ func TestOrderService_ApproveProvisionCreatesVPS(t *testing.T) {
 			1001: {HostID: 1001, HostName: "host", State: 2, RemoteIP: "1.1.1.1"},
 		},
 	}
-	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, fakeAuto, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, autoResolver, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
 
 	if err := svc.ApproveOrder(context.Background(), 1, order.ID); err != nil {
 		t.Fatalf("approve order: %v", err)
@@ -86,7 +87,8 @@ func TestOrderService_ApproveProvisionFailure(t *testing.T) {
 	fakeAuto := &testutil.FakeAutomationClient{
 		CreateHostErr: context.DeadlineExceeded,
 	}
-	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, fakeAuto, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
+	autoResolver := &testutil.FakeAutomationResolver{Client: fakeAuto}
+	svc := usecase.NewOrderService(repo, repo, repo, repo, repo, repo, repo, repo, repo, nil, autoResolver, nil, repo, repo, nil, repo, repo, repo, nil, nil, nil)
 
 	if err := svc.ApproveOrder(context.Background(), 1, order.ID); err != nil {
 		t.Fatalf("approve order: %v", err)

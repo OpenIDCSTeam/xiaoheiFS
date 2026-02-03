@@ -11,26 +11,71 @@
       </div>
       <a-card class="card auth-card">
         <div class="section-title">用户注册</div>
+        <a-alert
+          v-if="!settings.register_enabled"
+          type="warning"
+          show-icon
+          message="当前已关闭注册"
+          style="margin-bottom: 16px"
+        />
         <a-form :model="form" layout="vertical" @finish="onSubmit">
-          <a-form-item label="用户名" name="username" :rules="[{ required: true, message: '请输入用户名' }]">
+          <a-form-item
+            label="用户名"
+            name="username"
+            :rules="[{ required: isRequired('username'), message: '请输入用户名' }]"
+          >
             <a-input v-model:value="form.username" />
           </a-form-item>
-          <a-form-item label="邮箱" name="email" :rules="[{ required: true, message: '请输入邮箱' }]">
+          <a-form-item
+            label="邮箱"
+            name="email"
+            :rules="[{ required: isRequired('email'), message: '请输入邮箱' }]"
+          >
             <a-input v-model:value="form.email" />
           </a-form-item>
-          <a-form-item label="QQ" name="qq">
+          <a-form-item v-if="showField('qq')" label="QQ" name="qq" :rules="[{ required: isRequired('qq'), message: '请输入QQ' }]">
             <a-input v-model:value="form.qq" />
           </a-form-item>
-          <a-form-item label="密码" name="password" :rules="[{ required: true, message: '请输入密码' }]">
+          <a-form-item
+            v-if="showField('phone') || settings.register_verify_type === 'sms'"
+            label="手机号"
+            name="phone"
+            :rules="[{ required: isRequired('phone') || settings.register_verify_type === 'sms', message: '请输入手机号' }]"
+          >
+            <a-input v-model:value="form.phone" />
+          </a-form-item>
+          <a-form-item
+            label="密码"
+            name="password"
+            :rules="[{ required: isRequired('password'), message: '请输入密码' }]"
+          >
             <a-input-password v-model:value="form.password" />
           </a-form-item>
-          <a-form-item label="图形验证码" name="captcha_code" :rules="[{ required: true, message: '请输入验证码' }]">
+          <a-form-item
+            v-if="settings.register_captcha_enabled"
+            label="图形验证码"
+            name="captcha_code"
+            :rules="[{ required: true, message: '请输入验证码' }]"
+          >
             <div class="captcha">
               <a-input v-model:value="form.captcha_code" placeholder="验证码" />
               <div class="captcha-img" @click="refreshCaptcha">
                 <img v-if="captchaImage" :src="captchaImage" alt="captcha" />
                 <span v-else>点击刷新</span>
               </div>
+            </div>
+          </a-form-item>
+          <a-form-item
+            v-if="settings.register_verify_type !== 'none'"
+            :label="settings.register_verify_type === 'email' ? '邮箱验证码' : '短信验证码'"
+            name="verify_code"
+            :rules="[{ required: true, message: '请输入验证码' }]"
+          >
+            <div class="verify-code">
+              <a-input v-model:value="form.verify_code" placeholder="验证码" />
+              <a-button :disabled="sendCooling || !canSendCode" @click="sendCode">
+                {{ sendCooling ? `${sendCount}s` : "发送验证码" }}
+              </a-button>
             </div>
           </a-form-item>
           <a-button type="primary" html-type="submit" block :loading="loading">注册</a-button>
@@ -44,9 +89,9 @@
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from "vue";
+import { reactive, ref, onMounted, computed } from "vue";
 import { message } from "ant-design-vue";
-import { getCaptcha, userRegister } from "@/services/user";
+import { getCaptcha, userRegister, getAuthSettings, requestRegisterCode } from "@/services/user";
 import { useRouter } from "vue-router";
 import SiteLogoMedia from "@/components/brand/SiteLogoMedia.vue";
 
@@ -54,32 +99,102 @@ const router = useRouter();
 const loading = ref(false);
 const captchaId = ref("");
 const captchaImage = ref("");
+const sendCooling = ref(false);
+const sendCount = ref(60);
+let sendTimer;
 
 const form = reactive({
   username: "",
   email: "",
   qq: "",
+  phone: "",
   password: "",
-  captcha_code: ""
+  captcha_code: "",
+  verify_code: ""
+});
+
+const settings = reactive({
+  register_enabled: true,
+  register_required_fields: ["username", "email", "password"],
+  register_verify_type: "none",
+  register_captcha_enabled: true
+});
+
+const requiredSet = computed(() => new Set((settings.register_required_fields || []).map((v) => String(v).toLowerCase())));
+const isRequired = (field) => requiredSet.value.has(String(field).toLowerCase());
+const showField = (field) => isRequired(field) || field === "qq" || field === "phone";
+
+const canSendCode = computed(() => {
+  if (settings.register_verify_type === "email") {
+    return String(form.email || "").trim().length > 0;
+  }
+  if (settings.register_verify_type === "sms") {
+    return String(form.phone || "").trim().length > 0;
+  }
+  return false;
 });
 
 const refreshCaptcha = async () => {
+  if (!settings.register_captcha_enabled) return;
   const res = await getCaptcha();
   captchaId.value = res.data?.captcha_id || "";
   const base64 = res.data?.image_base64 || "";
   captchaImage.value = base64 ? `data:image/png;base64,${base64}` : "";
 };
 
+const loadSettings = async () => {
+  try {
+    const res = await getAuthSettings();
+    Object.assign(settings, res.data || {});
+  } catch (error) {
+    console.error("Failed to fetch auth settings:", error);
+  } finally {
+    refreshCaptcha();
+  }
+};
+
+const sendCode = async () => {
+  if (!canSendCode.value || sendCooling.value) return;
+  sendCooling.value = true;
+  sendCount.value = 60;
+  try {
+    await requestRegisterCode({
+      email: form.email,
+      phone: form.phone,
+      captcha_id: captchaId.value,
+      captcha_code: form.captcha_code
+    });
+    message.success("验证码已发送");
+  } catch (error) {
+    message.error("发送失败，请稍后重试");
+  } finally {
+    sendTimer = setInterval(() => {
+      sendCount.value -= 1;
+      if (sendCount.value <= 0) {
+        clearInterval(sendTimer);
+        sendTimer = null;
+        sendCooling.value = false;
+      }
+    }, 1000);
+  }
+};
+
 const onSubmit = async () => {
   loading.value = true;
   try {
+    if (!settings.register_enabled) {
+      message.warning("当前已关闭注册");
+      return;
+    }
     await userRegister({
       username: form.username,
       email: form.email,
       qq: form.qq,
+      phone: form.phone,
       password: form.password,
       captcha_id: captchaId.value,
-      captcha_code: form.captcha_code
+      captcha_code: form.captcha_code,
+      verify_code: form.verify_code
     });
     message.success("注册成功，请登录");
     router.replace("/login");
@@ -88,7 +203,7 @@ const onSubmit = async () => {
   }
 };
 
-onMounted(refreshCaptcha);
+onMounted(loadSettings);
 </script>
 
 <style scoped>
@@ -141,6 +256,15 @@ onMounted(refreshCaptcha);
 .captcha {
   display: flex;
   gap: 8px;
+}
+
+.verify-code {
+  display: flex;
+  gap: 8px;
+}
+
+.verify-code :deep(.ant-btn) {
+  flex: 0 0 120px;
 }
 
 .captcha-img {

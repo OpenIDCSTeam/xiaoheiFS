@@ -1,5 +1,6 @@
 <template>
   <div class="plugins-page">
+    <!-- payment-method toggles are host-managed -->
     <div class="hero">
       <div class="hero-left">
         <div class="hero-title">插件管理</div>
@@ -32,7 +33,7 @@
             <div class="plugin-cell">
               <div class="plugin-name">{{ record.name || record.plugin_id }}</div>
               <div class="plugin-meta">
-                <span class="mono">{{ record.category }}/{{ record.plugin_id }}</span>
+                <span class="mono">{{ record.category }}/{{ record.plugin_id }}/{{ record.instance_id || "default" }}</span>
                 <a-tag color="default" class="mono">v{{ record.version || "-" }}</a-tag>
               </div>
             </div>
@@ -44,10 +45,14 @@
             </a-tag>
           </template>
 
+          <template v-else-if="column.key === 'instance_id'">
+            <span class="mono">{{ record.instance_id || "default" }}</span>
+          </template>
+
           <template v-else-if="column.key === 'enabled'">
             <a-switch
               :checked="!!record.enabled"
-              :loading="busyKey === `${record.category}/${record.plugin_id}`"
+              :loading="busyKey === `${record.category}/${record.plugin_id}/${record.instance_id || 'default'}`"
               @change="(checked:boolean)=>toggleEnabled(record, checked)"
             />
           </template>
@@ -72,12 +77,24 @@
               </a-tag>
               <a-tag v-if="record.manifest?.capabilities?.sms" color="cyan">sms</a-tag>
               <a-tag v-if="record.manifest?.capabilities?.kyc" color="purple">kyc</a-tag>
+              <a-tag v-if="record.manifest?.capabilities?.automation" color="gold">
+                automation: {{ (record.manifest.capabilities.automation.features || []).length }} features
+              </a-tag>
               <a-button type="link" size="small" @click="openManifest(record)">详情</a-button>
             </div>
           </template>
 
           <template v-else-if="column.key === 'actions'">
             <a-space>
+              <a-button type="link" size="small" @click="openCreateInstance(record)">Add instance</a-button>
+              <a-button
+                v-if="String(record.category || '') === 'payment'"
+                type="link"
+                size="small"
+                @click="openPaymentMethods(record)"
+              >
+                Methods
+              </a-button>
               <a-button type="link" size="small" @click="openConfig(record)">配置</a-button>
               <a-popconfirm title="确定要卸载该插件吗？" @confirm="uninstall(record)">
                 <a-button type="link" danger size="small">卸载</a-button>
@@ -162,6 +179,15 @@
       </a-form>
     </a-modal>
 
+    <!-- Create instance -->
+    <a-modal v-model:open="instanceOpen" title="Add instance" :confirm-loading="instanceCreating" @ok="confirmCreateInstance">
+      <a-form layout="vertical">
+        <a-form-item label="instance_id (optional)">
+          <a-input v-model:value="instanceId" placeholder="Leave empty to auto-generate" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
     <!-- Config modal -->
     <a-modal v-model:open="configOpen" :title="`配置：${current?.name || current?.plugin_id || ''}`" width="760px" @ok="saveConfig" :confirm-loading="saving">
       <a-alert v-if="schemaError" type="error" show-icon :message="schemaError" style="margin-bottom: 12px" />
@@ -189,6 +215,29 @@
       <a-typography-title :level="5">Manifest JSON</a-typography-title>
       <a-textarea :value="prettyManifest" :rows="14" readonly />
     </a-drawer>
+
+    <!-- Payment methods -->
+    <a-modal v-model:open="methodsOpen" title="Payment methods" width="560px" :footer="null">
+      <a-alert
+        type="info"
+        show-icon
+        message="ListMethods 由插件声明；启用/停用开关由宿主管理。未设置开关的 method 默认启用。"
+        style="margin-bottom: 12px"
+      />
+      <a-spin :spinning="methodsLoading">
+        <a-table :columns="methodsColumns" :data-source="methodItems" :pagination="false" row-key="method">
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'enabled'">
+              <a-switch
+                :checked="!!record.enabled"
+                :loading="methodBusyKey === record.method"
+                @change="(checked:boolean)=>toggleMethod(record.method, checked)"
+              />
+            </template>
+          </template>
+        </a-table>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -198,23 +247,31 @@ import { message } from "ant-design-vue";
 import type { UploadRequestOption } from "ant-design-vue";
 import JsonSchemaForm from "@/components/forms/JsonSchemaForm.vue";
 import {
-  disableAdminPlugin,
+  createAdminPluginInstance,
   discoverAdminPlugins,
-  enableAdminPlugin,
-  getAdminPluginConfig,
-  getAdminPluginConfigSchema,
+  deleteAdminPluginInstance,
+  disableAdminPluginInstance,
+  enableAdminPluginInstance,
+  getAdminPluginInstanceConfig,
+  getAdminPluginInstanceConfigSchema,
   importAdminPluginFromDisk,
   installAdminPlugin,
+  listAdminPluginPaymentMethods,
   listAdminPlugins,
-  uninstallAdminPlugin,
-  updateAdminPluginConfig
+  updateAdminPluginPaymentMethod,
+  updateAdminPluginInstanceConfig
 } from "@/services/admin";
-import type { PluginDiscoverItem, PluginListItem } from "@/services/types";
+import type { PluginDiscoverItem, PluginListItem, PluginPaymentMethodItem } from "@/services/types";
 
 const loading = ref(false);
 const installing = ref(false);
 const saving = ref(false);
 const busyKey = ref("");
+
+const instanceOpen = ref(false);
+const instanceCreating = ref(false);
+const instanceId = ref("");
+const instanceTarget = ref<PluginListItem | null>(null);
 
 const items = ref<PluginListItem[]>([]);
 const category = ref<string>("all");
@@ -224,14 +281,16 @@ const categoryOptions = [
   { label: "全部", value: "all" },
   { label: "payment", value: "payment" },
   { label: "sms", value: "sms" },
-  { label: "kyc", value: "kyc" }
+  { label: "kyc", value: "kyc" },
+  { label: "automation", value: "automation" }
 ];
 
-const rowKey = (r: any) => `${r.category}/${r.plugin_id}`;
+const rowKey = (r: any) => `${r.category}/${r.plugin_id}/${r.instance_id || "default"}`;
 
 const columns = [
   { title: "插件", key: "plugin" },
   { title: "类型", dataIndex: "category", key: "category", width: 110 },
+  { title: "instance", dataIndex: "instance_id", key: "instance_id", width: 140 },
   { title: "签名", key: "signature", width: 120 },
   { title: "启用", key: "enabled", width: 90 },
   { title: "健康", key: "health", width: 220 },
@@ -244,7 +303,7 @@ const filtered = computed(() => {
   return (items.value || []).filter((it) => {
     if (category.value !== "all" && String(it.category || "") !== category.value) return false;
     if (!kw) return true;
-    const hay = `${it.name || ""} ${it.plugin_id || ""} ${it.category || ""}`.toLowerCase();
+    const hay = `${it.name || ""} ${it.plugin_id || ""} ${it.category || ""} ${it.instance_id || ""}`.toLowerCase();
     return hay.includes(kw);
   });
 });
@@ -292,17 +351,40 @@ const formatTime = (iso: string) => {
 };
 
 const toggleEnabled = async (record: any, checked: boolean) => {
-  const key = `${record.category}/${record.plugin_id}`;
+  const key = `${record.category}/${record.plugin_id}/${record.instance_id || "default"}`;
   busyKey.value = key;
   try {
-    if (checked) await enableAdminPlugin(record.category, record.plugin_id);
-    else await disableAdminPlugin(record.category, record.plugin_id);
+    if (checked) await enableAdminPluginInstance(record.category, record.plugin_id, record.instance_id || "default");
+    else await disableAdminPluginInstance(record.category, record.plugin_id, record.instance_id || "default");
     record.enabled = checked;
     message.success("操作成功");
   } catch (e: any) {
     message.error(e?.response?.data?.error || "操作失败");
   } finally {
     busyKey.value = "";
+  }
+};
+
+const openCreateInstance = (record: PluginListItem) => {
+  instanceTarget.value = record;
+  instanceId.value = "";
+  instanceOpen.value = true;
+};
+
+const confirmCreateInstance = async () => {
+  if (!instanceTarget.value) return;
+  instanceCreating.value = true;
+  try {
+    await createAdminPluginInstance(String(instanceTarget.value.category || ""), String(instanceTarget.value.plugin_id || ""), {
+      instance_id: instanceId.value.trim()
+    });
+    message.success("OK");
+    instanceOpen.value = false;
+    await fetchData();
+  } catch (e: any) {
+    message.error(e?.response?.data?.error || "failed");
+  } finally {
+    instanceCreating.value = false;
   }
 };
 
@@ -433,7 +515,7 @@ const confirmImport = async () => {
 
 const uninstall = async (record: any) => {
   try {
-    await uninstallAdminPlugin(record.category, record.plugin_id);
+    await deleteAdminPluginInstance(record.category, record.plugin_id, record.instance_id || "default");
     message.success("卸载成功");
     fetchData();
   } catch (e: any) {
@@ -476,8 +558,8 @@ const openConfig = async (record: PluginListItem) => {
   configModel.value = {};
   try {
     const [schemaRes, cfgRes] = await Promise.all([
-      getAdminPluginConfigSchema(record.category || "", record.plugin_id || ""),
-      getAdminPluginConfig(record.category || "", record.plugin_id || "")
+      getAdminPluginInstanceConfigSchema(record.category || "", record.plugin_id || "", record.instance_id || "default"),
+      getAdminPluginInstanceConfig(record.category || "", record.plugin_id || "", record.instance_id || "default")
     ]);
     const sj = safeJson(schemaRes.data?.json_schema || "{}");
     const uj = safeJson(schemaRes.data?.ui_schema || "{}") || {};
@@ -501,7 +583,12 @@ const saveConfig = async () => {
   saving.value = true;
   try {
     const payload = JSON.stringify(configModel.value || {});
-    await updateAdminPluginConfig(current.value.category || "", current.value.plugin_id || "", payload);
+    await updateAdminPluginInstanceConfig(
+      current.value.category || "",
+      current.value.plugin_id || "",
+      current.value.instance_id || "default",
+      payload
+    );
     message.success("保存成功");
     configOpen.value = false;
     fetchData();
@@ -525,6 +612,58 @@ const prettyManifest = computed(() => {
     return "";
   }
 });
+
+// Payment method toggles (host-managed)
+const methodsOpen = ref(false);
+const methodsLoading = ref(false);
+const methodBusyKey = ref("");
+const methodItems = ref<PluginPaymentMethodItem[]>([]);
+
+const methodsColumns = [
+  { title: "method", dataIndex: "method", key: "method" },
+  { title: "enabled", key: "enabled", width: 120 }
+];
+
+const openPaymentMethods = async (record: PluginListItem) => {
+  if (String(record.category || "") !== "payment") return;
+  current.value = record;
+  methodsOpen.value = true;
+  methodsLoading.value = true;
+  try {
+    const res = await listAdminPluginPaymentMethods({
+      category: String(record.category || "payment"),
+      plugin_id: String(record.plugin_id || ""),
+      instance_id: String(record.instance_id || "default")
+    });
+    methodItems.value = (res.data?.items || []) as PluginPaymentMethodItem[];
+  } catch (e: any) {
+    message.error(e?.response?.data?.error || "加载失败");
+  } finally {
+    methodsLoading.value = false;
+  }
+};
+
+const toggleMethod = async (method: string, enabled: boolean) => {
+  const rec = current.value;
+  if (!rec) return;
+  methodBusyKey.value = method;
+  try {
+    await updateAdminPluginPaymentMethod({
+      category: String(rec.category || "payment"),
+      plugin_id: String(rec.plugin_id || ""),
+      instance_id: String(rec.instance_id || "default"),
+      method,
+      enabled
+    });
+    const it = methodItems.value.find((x) => x.method === method);
+    if (it) it.enabled = enabled;
+    message.success("OK");
+  } catch (e: any) {
+    message.error(e?.response?.data?.error || "failed");
+  } finally {
+    methodBusyKey.value = "";
+  }
+};
 </script>
 
 <style scoped>

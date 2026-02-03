@@ -12,12 +12,19 @@ import (
 
 type VPSService struct {
 	vps        VPSRepository
-	automation AutomationClient
+	automation AutomationClientResolver
 	settings   SettingsRepository
 }
 
-func NewVPSService(vps VPSRepository, automation AutomationClient, settings SettingsRepository) *VPSService {
+func NewVPSService(vps VPSRepository, automation AutomationClientResolver, settings SettingsRepository) *VPSService {
 	return &VPSService{vps: vps, automation: automation, settings: settings}
+}
+
+func (s *VPSService) client(ctx context.Context, goodsTypeID int64) (AutomationClient, error) {
+	if s.automation == nil {
+		return nil, ErrInvalidInput
+	}
+	return s.automation.ClientForGoodsType(ctx, goodsTypeID)
 }
 
 func (s *VPSService) ListByUser(ctx context.Context, userID int64) ([]domain.VPSInstance, error) {
@@ -64,7 +71,11 @@ func (s *VPSService) RefreshStatus(ctx context.Context, inst domain.VPSInstance)
 	if hostID == 0 {
 		return domain.VPSInstance{}, ErrInvalidInput
 	}
-	info, err := s.automation.GetHostInfo(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return domain.VPSInstance{}, err
+	}
+	info, err := cli.GetHostInfo(ctx, hostID)
 	if err != nil {
 		return domain.VPSInstance{}, err
 	}
@@ -96,11 +107,15 @@ func (s *VPSService) GetPanelURL(ctx context.Context, inst domain.VPSInstance) (
 	if hostID == 0 {
 		return "", ErrInvalidInput
 	}
-	info, err := s.automation.GetHostInfo(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
 	if err != nil {
 		return "", err
 	}
-	url, err := s.automation.GetPanelURL(ctx, info.HostName, info.PanelPassword)
+	info, err := cli.GetHostInfo(ctx, hostID)
+	if err != nil {
+		return "", err
+	}
+	url, err := cli.GetPanelURL(ctx, info.HostName, info.PanelPassword)
 	if err != nil {
 		return "", err
 	}
@@ -113,6 +128,10 @@ func (s *VPSService) RenewNow(ctx context.Context, inst domain.VPSInstance, days
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
 	if days <= 0 {
 		days = 30
 	}
@@ -120,11 +139,11 @@ func (s *VPSService) RenewNow(ctx context.Context, inst domain.VPSInstance, days
 	if inst.ExpireAt != nil && inst.ExpireAt.After(time.Now()) {
 		next = inst.ExpireAt.Add(time.Duration(days) * 24 * time.Hour)
 	}
-	if err := s.automation.RenewHost(ctx, hostID, next); err != nil {
+	if err := cli.RenewHost(ctx, hostID, next); err != nil {
 		return err
 	}
 	if inst.AdminStatus != domain.VPSAdminStatusNormal || inst.Status == domain.VPSStatusExpiredLocked {
-		_ = s.automation.UnlockHost(ctx, hostID)
+		_ = cli.UnlockHost(ctx, hostID)
 	}
 	return s.vps.UpdateInstanceExpireAt(ctx, inst.ID, next)
 }
@@ -134,7 +153,11 @@ func (s *VPSService) Start(ctx context.Context, inst domain.VPSInstance) error {
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.StartHost(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.StartHost(ctx, hostID)
 }
 
 func (s *VPSService) Shutdown(ctx context.Context, inst domain.VPSInstance) error {
@@ -142,7 +165,11 @@ func (s *VPSService) Shutdown(ctx context.Context, inst domain.VPSInstance) erro
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.ShutdownHost(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.ShutdownHost(ctx, hostID)
 }
 
 func (s *VPSService) Reboot(ctx context.Context, inst domain.VPSInstance) error {
@@ -150,7 +177,11 @@ func (s *VPSService) Reboot(ctx context.Context, inst domain.VPSInstance) error 
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.RebootHost(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.RebootHost(ctx, hostID)
 }
 
 func (s *VPSService) ResetOS(ctx context.Context, inst domain.VPSInstance, templateID int64, password string) error {
@@ -175,7 +206,11 @@ func (s *VPSService) ResetOS(ctx context.Context, inst domain.VPSInstance, templ
 	if password == "" {
 		return ErrInvalidInput
 	}
-	if err := s.automation.ResetOS(ctx, hostID, templateID, password); err != nil {
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	if err := cli.ResetOS(ctx, hostID, templateID, password); err != nil {
 		return err
 	}
 	_ = s.vps.UpdateInstanceStatus(ctx, inst.ID, domain.VPSStatusReinstalling, 4)
@@ -200,7 +235,11 @@ func (s *VPSService) ResetOSPassword(ctx context.Context, inst domain.VPSInstanc
 	if password == "" {
 		return ErrInvalidInput
 	}
-	if err := s.automation.ResetOSPassword(ctx, hostID, password); err != nil {
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	if err := cli.ResetOSPassword(ctx, hostID, password); err != nil {
 		return err
 	}
 	access := map[string]any{}
@@ -217,7 +256,11 @@ func (s *VPSService) ListSnapshots(ctx context.Context, inst domain.VPSInstance)
 	if hostID == 0 {
 		return nil, ErrInvalidInput
 	}
-	return s.automation.ListSnapshots(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.ListSnapshots(ctx, hostID)
 }
 
 func (s *VPSService) CreateSnapshot(ctx context.Context, inst domain.VPSInstance) error {
@@ -225,7 +268,11 @@ func (s *VPSService) CreateSnapshot(ctx context.Context, inst domain.VPSInstance
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.CreateSnapshot(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.CreateSnapshot(ctx, hostID)
 }
 
 func (s *VPSService) DeleteSnapshot(ctx context.Context, inst domain.VPSInstance, snapshotID int64) error {
@@ -233,7 +280,11 @@ func (s *VPSService) DeleteSnapshot(ctx context.Context, inst domain.VPSInstance
 	if hostID == 0 || snapshotID <= 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.DeleteSnapshot(ctx, hostID, snapshotID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeleteSnapshot(ctx, hostID, snapshotID)
 }
 
 func (s *VPSService) RestoreSnapshot(ctx context.Context, inst domain.VPSInstance, snapshotID int64) error {
@@ -241,7 +292,11 @@ func (s *VPSService) RestoreSnapshot(ctx context.Context, inst domain.VPSInstanc
 	if hostID == 0 || snapshotID <= 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.RestoreSnapshot(ctx, hostID, snapshotID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.RestoreSnapshot(ctx, hostID, snapshotID)
 }
 
 func (s *VPSService) ListBackups(ctx context.Context, inst domain.VPSInstance) ([]AutomationBackup, error) {
@@ -249,7 +304,11 @@ func (s *VPSService) ListBackups(ctx context.Context, inst domain.VPSInstance) (
 	if hostID == 0 {
 		return nil, ErrInvalidInput
 	}
-	return s.automation.ListBackups(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.ListBackups(ctx, hostID)
 }
 
 func (s *VPSService) CreateBackup(ctx context.Context, inst domain.VPSInstance) error {
@@ -257,7 +316,11 @@ func (s *VPSService) CreateBackup(ctx context.Context, inst domain.VPSInstance) 
 	if hostID == 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.CreateBackup(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.CreateBackup(ctx, hostID)
 }
 
 func (s *VPSService) DeleteBackup(ctx context.Context, inst domain.VPSInstance, backupID int64) error {
@@ -265,7 +328,11 @@ func (s *VPSService) DeleteBackup(ctx context.Context, inst domain.VPSInstance, 
 	if hostID == 0 || backupID <= 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.DeleteBackup(ctx, hostID, backupID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeleteBackup(ctx, hostID, backupID)
 }
 
 func (s *VPSService) RestoreBackup(ctx context.Context, inst domain.VPSInstance, backupID int64) error {
@@ -273,7 +340,11 @@ func (s *VPSService) RestoreBackup(ctx context.Context, inst domain.VPSInstance,
 	if hostID == 0 || backupID <= 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.RestoreBackup(ctx, hostID, backupID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.RestoreBackup(ctx, hostID, backupID)
 }
 
 func (s *VPSService) ListFirewallRules(ctx context.Context, inst domain.VPSInstance) ([]AutomationFirewallRule, error) {
@@ -281,7 +352,11 @@ func (s *VPSService) ListFirewallRules(ctx context.Context, inst domain.VPSInsta
 	if hostID == 0 {
 		return nil, ErrInvalidInput
 	}
-	return s.automation.ListFirewallRules(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.ListFirewallRules(ctx, hostID)
 }
 
 func (s *VPSService) AddFirewallRule(ctx context.Context, inst domain.VPSInstance, req AutomationFirewallRuleCreate) error {
@@ -290,7 +365,11 @@ func (s *VPSService) AddFirewallRule(ctx context.Context, inst domain.VPSInstanc
 		return ErrInvalidInput
 	}
 	req.HostID = hostID
-	return s.automation.AddFirewallRule(ctx, req)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.AddFirewallRule(ctx, req)
 }
 
 func (s *VPSService) DeleteFirewallRule(ctx context.Context, inst domain.VPSInstance, ruleID int64) error {
@@ -298,7 +377,11 @@ func (s *VPSService) DeleteFirewallRule(ctx context.Context, inst domain.VPSInst
 	if hostID == 0 || ruleID <= 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.DeleteFirewallRule(ctx, hostID, ruleID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeleteFirewallRule(ctx, hostID, ruleID)
 }
 
 func (s *VPSService) ListPortMappings(ctx context.Context, inst domain.VPSInstance) ([]AutomationPortMapping, error) {
@@ -306,7 +389,11 @@ func (s *VPSService) ListPortMappings(ctx context.Context, inst domain.VPSInstan
 	if hostID == 0 {
 		return nil, ErrInvalidInput
 	}
-	return s.automation.ListPortMappings(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.ListPortMappings(ctx, hostID)
 }
 
 func (s *VPSService) AddPortMapping(ctx context.Context, inst domain.VPSInstance, req AutomationPortMappingCreate) error {
@@ -315,7 +402,11 @@ func (s *VPSService) AddPortMapping(ctx context.Context, inst domain.VPSInstance
 		return ErrInvalidInput
 	}
 	req.HostID = hostID
-	return s.automation.AddPortMapping(ctx, req)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.AddPortMapping(ctx, req)
 }
 
 func (s *VPSService) DeletePortMapping(ctx context.Context, inst domain.VPSInstance, mappingID int64) error {
@@ -323,7 +414,11 @@ func (s *VPSService) DeletePortMapping(ctx context.Context, inst domain.VPSInsta
 	if hostID == 0 || mappingID <= 0 {
 		return ErrInvalidInput
 	}
-	return s.automation.DeletePortMapping(ctx, hostID, mappingID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeletePortMapping(ctx, hostID, mappingID)
 }
 
 func (s *VPSService) FindPortCandidates(ctx context.Context, inst domain.VPSInstance, keywords string) ([]int64, error) {
@@ -331,7 +426,11 @@ func (s *VPSService) FindPortCandidates(ctx context.Context, inst domain.VPSInst
 	if hostID == 0 {
 		return nil, ErrInvalidInput
 	}
-	return s.automation.FindPortCandidates(ctx, hostID, keywords)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.FindPortCandidates(ctx, hostID, keywords)
 }
 
 func (s *VPSService) Monitor(ctx context.Context, inst domain.VPSInstance) (AutomationMonitor, error) {
@@ -339,7 +438,11 @@ func (s *VPSService) Monitor(ctx context.Context, inst domain.VPSInstance) (Auto
 	if hostID == 0 {
 		return AutomationMonitor{}, ErrInvalidInput
 	}
-	return s.automation.GetMonitor(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return AutomationMonitor{}, err
+	}
+	return cli.GetMonitor(ctx, hostID)
 }
 
 func mergeSpecInfo(existing string, info AutomationHostInfo) string {
@@ -372,7 +475,11 @@ func (s *VPSService) VNCURL(ctx context.Context, inst domain.VPSInstance) (strin
 	if hostID == 0 {
 		return "", ErrInvalidInput
 	}
-	return s.automation.GetVNCURL(ctx, hostID)
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return "", err
+	}
+	return cli.GetVNCURL(ctx, hostID)
 }
 
 func (s *VPSService) EmergencyRenew(ctx context.Context, inst domain.VPSInstance) (domain.VPSInstance, error) {
@@ -395,15 +502,19 @@ func (s *VPSService) EmergencyRenew(ctx context.Context, inst domain.VPSInstance
 	if hostID == 0 {
 		return domain.VPSInstance{}, ErrInvalidInput
 	}
+	cli, err := s.client(ctx, inst.GoodsTypeID)
+	if err != nil {
+		return domain.VPSInstance{}, err
+	}
 	next := time.Now().Add(time.Duration(policy.RenewDays) * 24 * time.Hour)
 	if inst.ExpireAt != nil && inst.ExpireAt.After(time.Now()) {
 		next = inst.ExpireAt.Add(time.Duration(policy.RenewDays) * 24 * time.Hour)
 	}
-	if err := s.automation.RenewHost(ctx, hostID, next); err != nil {
+	if err := cli.RenewHost(ctx, hostID, next); err != nil {
 		return domain.VPSInstance{}, err
 	}
 	if inst.AdminStatus != domain.VPSAdminStatusNormal || inst.Status == domain.VPSStatusExpiredLocked {
-		_ = s.automation.UnlockHost(ctx, hostID)
+		_ = cli.UnlockHost(ctx, hostID)
 	}
 	now := time.Now()
 	_ = s.vps.UpdateInstanceExpireAt(ctx, inst.ID, next)
@@ -439,7 +550,11 @@ func (s *VPSService) AutoDeleteExpired(ctx context.Context) error {
 		if hostID == 0 {
 			continue
 		}
-		if err := s.automation.DeleteHost(ctx, hostID); err != nil {
+		cli, err := s.client(ctx, inst.GoodsTypeID)
+		if err != nil {
+			continue
+		}
+		if err := cli.DeleteHost(ctx, hostID); err != nil {
 			continue
 		}
 		_ = s.vps.DeleteInstance(ctx, inst.ID)
