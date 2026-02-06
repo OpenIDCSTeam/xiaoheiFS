@@ -518,6 +518,16 @@ func migrateSQLite(db *sql.DB) error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(user_id) REFERENCES users(id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS push_tokens (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			platform TEXT NOT NULL,
+			token TEXT NOT NULL,
+			device_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY(user_id) REFERENCES users(id)
+		);`,
 		`CREATE TABLE IF NOT EXISTS realname_verifications (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER NOT NULL,
@@ -558,6 +568,8 @@ func migrateSQLite(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_ticket_resources_ticket ON ticket_resources(ticket_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_tokens_user_token ON push_tokens(user_id, token);`,
+		`CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_transactions_ref ON wallet_transactions(user_id, ref_type, ref_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_wallet_orders_user ON wallet_orders(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);`,

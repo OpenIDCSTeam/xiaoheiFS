@@ -127,16 +127,7 @@ class _LoginScreenState extends State<LoginScreen>
     return Scaffold(
       body: SafeArea(
         child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFFF5F9F7),
-                Color(0xFFE9F3F1),
-              ],
-            ),
-          ),
+          color: const Color(0xFFF5F7F6),
           child: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
@@ -146,19 +137,12 @@ class _LoginScreenState extends State<LoginScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '小黑云财务管理系统',
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '管理员控制台',
+                      '小黑财务管理系统',
                       style: theme.textTheme.titleLarge?.copyWith(
-                        color: Colors.black54,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 12),
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(20),
@@ -166,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '登录',
+                              '管理员登录',
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
@@ -197,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen>
                             ),
                             const SizedBox(height: 16),
                             SizedBox(
-                              height: 260,
+                              height: 230,
                               child: TabBarView(
                                 controller: _tabController,
                                 children: [
@@ -218,7 +202,7 @@ class _LoginScreenState extends State<LoginScreen>
                                             return null;
                                           },
                                         ),
-                                        const SizedBox(height: 16),
+                                        const SizedBox(height: 12),
                                         TextFormField(
                                           controller: _loginPasswordController,
                                           obscureText: true,
@@ -272,7 +256,7 @@ class _LoginScreenState extends State<LoginScreen>
                                             return null;
                                           },
                                         ),
-                                        const SizedBox(height: 16),
+                                        const SizedBox(height: 12),
                                         TextFormField(
                                           controller: _usernameController,
                                           decoration: const InputDecoration(
@@ -315,13 +299,6 @@ class _LoginScreenState extends State<LoginScreen>
                             ],
                           ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '建议使用账号登录，自动获取权限与资料。',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black45,
                       ),
                     ),
                   ],

@@ -1,4 +1,7 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:io';
+
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter.material.dart';
 import 'package:provider/provider.dart';
 
 import 'app_state.dart';
@@ -7,6 +10,11 @@ import 'screens/root_scaffold.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) {
+    try {
+      await Firebase.initializeApp();
+    } catch (_) {}
+  }
   final appState = AppState();
   await appState.load();
   runApp(MyApp(appState: appState));
@@ -42,3 +50,4 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+

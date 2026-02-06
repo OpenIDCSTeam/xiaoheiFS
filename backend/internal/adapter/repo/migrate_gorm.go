@@ -49,6 +49,7 @@ func migrateGorm(db *gorm.DB) error {
 		&walletOrderRow{},
 		&scheduledTaskRunRow{},
 		&notificationRow{},
+		&pushTokenRow{},
 		&realnameVerificationRow{},
 		&pluginInstallationRow{},
 		&pluginPaymentMethodRow{},
@@ -630,6 +631,18 @@ type notificationRow struct {
 }
 
 func (notificationRow) TableName() string { return "notifications" }
+
+type pushTokenRow struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement;column:id"`
+	UserID    int64     `gorm:"column:user_id;not null;uniqueIndex:idx_push_tokens_user_token,priority:1;index:idx_push_tokens_user"`
+	Platform  string    `gorm:"column:platform;not null"`
+	Token     string    `gorm:"column:token;not null;uniqueIndex:idx_push_tokens_user_token,priority:2"`
+	DeviceID  string    `gorm:"column:device_id;not null;default:''"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (pushTokenRow) TableName() string { return "push_tokens" }
 
 type realnameVerificationRow struct {
 	ID         int64      `gorm:"primaryKey;autoIncrement;column:id"`

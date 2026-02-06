@@ -14,6 +14,7 @@ import (
 	"xiaoheiplay/internal/adapter/http"
 	"xiaoheiplay/internal/adapter/payment"
 	"xiaoheiplay/internal/adapter/plugins"
+	"xiaoheiplay/internal/adapter/push"
 	"xiaoheiplay/internal/adapter/realname"
 	"xiaoheiplay/internal/adapter/repo"
 	"xiaoheiplay/internal/adapter/robot"
@@ -92,7 +93,10 @@ func main() {
 	automationResolver := automation.NewResolver(repoSQLite, pluginMgr, legacyAutomation)
 	emailSender := email.NewSender(repoSQLite)
 	robotNotifier := robot.NewWebhookNotifier(repoSQLite)
-	eventBus := event.NewFanoutPublisher(broker, robotNotifier)
+	pushSender := push.NewFCMSender()
+	pushSvc := usecase.NewPushService(repoSQLite, repoSQLite, repoSQLite, pushSender)
+	pushNotifier := push.NewOrderPushNotifier(repoSQLite, pushSvc)
+	eventBus := event.NewFanoutPublisher(broker, robotNotifier, pushNotifier)
 	realnameRegistry := realname.NewRegistry()
 	realnameSvc := usecase.NewRealNameService(repoSQLite, realnameRegistry, repoSQLite)
 	messageSvc := usecase.NewMessageCenterService(repoSQLite, repoSQLite)
@@ -130,6 +134,7 @@ func main() {
 
 	handler := http.NewHandlerWithServices(authSvc, catalogSvc, goodsTypeSvc, cartSvc, orderSvc, vpsSvc, adminSvc, adminVPSSvc, integrationSvc, reportSvc, cmsSvc, ticketSvc, walletSvc, walletOrderSvc, paymentSvc, messageSvc, statusSvc, realnameSvc, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, repoSQLite, broker, cfg.JWTSecret, legacyAutomation, passwordResetSvc, permissionSvc, taskSvc)
 	handler.SetPaymentPluginConfig(pluginDir, pluginPassword)
+	handler.SetPushService(pushSvc)
 	handler.SetPluginManager(pluginMgr)
 	handler.SetPluginPaymentMethodRepo(repoSQLite)
 	middleware := http.NewMiddleware(cfg.JWTSecret, apiKeySvc, permissionSvc)

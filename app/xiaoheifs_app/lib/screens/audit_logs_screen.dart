@@ -49,7 +49,22 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
         }
         if (snapshot.hasError) {
           return Scaffold(
-            appBar: AppBar(title: const Text('操作日志')),
+            appBar: AppBar(
+              title: const Text('操作日志'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () {
+                    final client = context.read<AppState>().apiClient;
+                    if (client != null) {
+                      setState(() {
+                        _future = _load(client);
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
             body: _ErrorState(
               message: '加载日志失败，请检查 API Key 权限。',
               onRetry: () {
@@ -65,7 +80,22 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
         }
         final items = snapshot.data ?? [];
         return Scaffold(
-          appBar: AppBar(title: const Text('操作日志')),
+          appBar: AppBar(
+            title: const Text('操作日志'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () {
+                  final client = context.read<AppState>().apiClient;
+                  if (client != null) {
+                    setState(() {
+                      _future = _load(client);
+                    });
+                  }
+                },
+              ),
+            ],
+          ),
           body: RefreshIndicator(
             onRefresh: () async {
               final client = context.read<AppState>().apiClient;
@@ -77,19 +107,80 @@ class _AuditLogsScreenState extends State<AuditLogsScreen> {
               await _future;
             },
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               itemCount: items.isEmpty ? 1 : items.length,
               itemBuilder: (context, index) {
                 if (items.isEmpty) {
                   return const _EmptyState();
                 }
                 final item = items[index];
-                return Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.history),
-                    title: Text(item.action),
-                    subtitle: Text('${item.targetType} · ${item.targetId}'),
-                    trailing: Text(item.createdAt),
+                final theme = Theme.of(context);
+                final colorScheme = theme.colorScheme;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: colorScheme.outlineVariant.withOpacity(0.5),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: colorScheme.shadow.withOpacity(0.05),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.history, color: colorScheme.primary),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.action,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${item.targetType} · ${item.targetId}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primaryContainer.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          item.createdAt,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               },

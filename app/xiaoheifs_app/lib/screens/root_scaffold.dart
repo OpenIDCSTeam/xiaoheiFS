@@ -1,5 +1,12 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'dart:io';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../app_state.dart';
+import '../services/api_client.dart';
 import 'home_screen.dart';
 import 'orders_screen.dart';
 import 'servers_screen.dart';
@@ -15,6 +22,7 @@ class RootScaffold extends StatefulWidget {
 
 class _RootScaffoldState extends State<RootScaffold> {
   int _index = 0;
+  StreamSubscription<String>? _tokenSub;
 
   final List<_TabItem> _tabs = const [
     _TabItem(title: '主页', icon: Icons.dashboard, widget: HomeScreen()),
@@ -23,6 +31,46 @@ class _RootScaffoldState extends State<RootScaffold> {
     _TabItem(title: '服务器管理', icon: Icons.dns, widget: ServersScreen()),
     _TabItem(title: '工单', icon: Icons.support_agent, widget: TicketsScreen()),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _initPush();
+  }
+
+  @override
+  void dispose() {
+    _tokenSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initPush() async {
+    if (!Platform.isAndroid) return;
+    final client = context.read<AppState>().apiClient;
+    if (client == null) return;
+    try {
+      await FirebaseMessaging.instance.requestPermission();
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _registerToken(client, token);
+      }
+      _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+        final latest = context.read<AppState>().apiClient;
+        if (latest != null && token.isNotEmpty) {
+          _registerToken(latest, token);
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _registerToken(ApiClient client, String token) async {
+    try {
+      await client.postJson('/admin/api/v1/push-tokens', body: {
+        'token': token,
+        'platform': 'android',
+      });
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {

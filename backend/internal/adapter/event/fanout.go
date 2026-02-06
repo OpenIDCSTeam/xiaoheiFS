@@ -7,17 +7,17 @@ import (
 	"xiaoheiplay/internal/usecase"
 )
 
-type WebhookSink interface {
+type EventSink interface {
 	NotifyOrderEvent(ctx context.Context, ev domain.OrderEvent) error
 }
 
 type FanoutPublisher struct {
-	primary  usecase.EventPublisher
-	webhooks WebhookSink
+	primary usecase.EventPublisher
+	sinks   []EventSink
 }
 
-func NewFanoutPublisher(primary usecase.EventPublisher, webhooks WebhookSink) *FanoutPublisher {
-	return &FanoutPublisher{primary: primary, webhooks: webhooks}
+func NewFanoutPublisher(primary usecase.EventPublisher, sinks ...EventSink) *FanoutPublisher {
+	return &FanoutPublisher{primary: primary, sinks: sinks}
 }
 
 func (p *FanoutPublisher) Publish(ctx context.Context, orderID int64, eventType string, payload any) (domain.OrderEvent, error) {
@@ -25,8 +25,11 @@ func (p *FanoutPublisher) Publish(ctx context.Context, orderID int64, eventType 
 	if err != nil {
 		return ev, err
 	}
-	if p.webhooks != nil {
-		_ = p.webhooks.NotifyOrderEvent(ctx, ev)
+	for _, sink := range p.sinks {
+		if sink == nil {
+			continue
+		}
+		_ = sink.NotifyOrderEvent(ctx, ev)
 	}
 	return ev, nil
 }

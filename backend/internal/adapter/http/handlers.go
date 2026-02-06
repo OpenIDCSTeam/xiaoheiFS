@@ -73,6 +73,7 @@ type Handler struct {
 	walletOrder   *usecase.WalletOrderService
 	paymentSvc    *usecase.PaymentService
 	messageSvc    *usecase.MessageCenterService
+	pushSvc       *usecase.PushService
 	statusSvc     *usecase.ServerStatusService
 	realnameSvc   *usecase.RealNameService
 	orderItems    usecase.OrderItemRepository
@@ -271,6 +272,10 @@ func validatePasswordBySettings(password string, s authSettings) error {
 func (h *Handler) SetPaymentPluginConfig(dir, password string) {
 	h.pluginDir = strings.TrimSpace(dir)
 	h.pluginPass = strings.TrimSpace(password)
+}
+
+func (h *Handler) SetPushService(pushSvc *usecase.PushService) {
+	h.pushSvc = pushSvc
 }
 
 func (h *Handler) SetPluginManager(mgr *plugins.Manager) {
@@ -4825,6 +4830,46 @@ func (h *Handler) AdminSettingsUpdate(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPushTokenRegister(c *gin.Context) {
+	if h.pushSvc == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	var payload struct {
+		Token    string `json:"token"`
+		Platform string `json:"platform"`
+		DeviceID string `json:"device_id"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if err := h.pushSvc.RegisterToken(c, getUserID(c), payload.Platform, payload.Token, payload.DeviceID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) AdminPushTokenDelete(c *gin.Context) {
+	if h.pushSvc == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not supported"})
+		return
+	}
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if err := h.pushSvc.RemoveToken(c, getUserID(c), payload.Token); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

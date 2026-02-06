@@ -268,6 +268,8 @@ func NewServer(handler *Handler, middleware *Middleware) *Server {
 		admin.POST("/wallet/orders/:id/reject", handler.AdminWalletOrderReject)
 		admin.GET("/settings", handler.AdminSettingsList)
 		admin.PATCH("/settings", handler.AdminSettingsUpdate)
+		admin.POST("/push-tokens", handler.AdminPushTokenRegister)
+		admin.DELETE("/push-tokens", handler.AdminPushTokenDelete)
 		admin.GET("/cms/categories", handler.AdminCMSCategories)
 		admin.POST("/cms/categories", handler.AdminCMSCategoryCreate)
 		admin.PATCH("/cms/categories/:id", handler.AdminCMSCategoryUpdate)

@@ -82,6 +82,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const SettingsScreen()),
+        ),
+        child: const Icon(Icons.settings),
+      ),
       body: FutureBuilder<DashboardData>(
         future: _future,
         builder: (context, snapshot) {
@@ -145,6 +152,7 @@ class _HeaderSliver extends StatefulWidget {
 
 class _HeaderSliverState extends State<_HeaderSliver> {
   Future<Map<String, dynamic>>? _future;
+  Future<String>? _siteNameFuture;
   ApiClient? _client;
 
   @override
@@ -157,8 +165,40 @@ class _HeaderSliverState extends State<_HeaderSliver> {
       _client = client;
       if (client != null) {
         _future = client.getJson('/admin/api/v1/profile');
+        _siteNameFuture = _loadSiteName(client);
       }
     }
+  }
+
+  Future<String> _loadSiteName(ApiClient client) async {
+    try {
+      final resp = await client.getJson('/admin/api/v1/settings');
+      final items = (resp['items'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      String? pickByKey(String key) {
+        for (final item in items) {
+          if ((item['key']?.toString() ?? '').toLowerCase() == key) {
+            return item['value']?.toString();
+          }
+        }
+        return null;
+      }
+
+      final candidates = [
+        pickByKey('site_name'),
+        pickByKey('site_title'),
+        pickByKey('web_name'),
+        pickByKey('web_title'),
+        pickByKey('website_name'),
+        pickByKey('title'),
+        pickByKey('name'),
+      ];
+      for (final c in candidates) {
+        if (c != null && c.trim().isNotEmpty) return c.trim();
+      }
+    } catch (_) {}
+    return '';
   }
 
   @override
@@ -175,15 +215,6 @@ class _HeaderSliverState extends State<_HeaderSliver> {
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.settings, color: Colors.white),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const SettingsScreen()),
-          ),
-        ),
-      ],
       flexibleSpace: FlexibleSpaceBar(
         collapseMode: CollapseMode.parallax,
         background: Stack(
@@ -225,17 +256,8 @@ class _HeaderSliverState extends State<_HeaderSliver> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(height: kToolbarHeight - 8),
                     Row(
                       children: [
-                        const Text(
-                          '小黑云',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
                         const Spacer(),
                         FutureBuilder<Map<String, dynamic>>(
                           future: _future,
@@ -261,10 +283,8 @@ class _HeaderSliverState extends State<_HeaderSliver> {
                                         width: 36,
                                         height: 36,
                                         fit: BoxFit.cover,
-                                        headers:
-                                            headers.isEmpty ? null : headers,
-                                        errorBuilder:
-                                            (context, error, stack) {
+                                        headers: headers.isEmpty ? null : headers,
+                                        errorBuilder: (context, error, stack) {
                                           return const Icon(
                                             Icons.person,
                                             color: Colors.white,
@@ -287,8 +307,30 @@ class _HeaderSliverState extends State<_HeaderSliver> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
                     const Spacer(),
+                    FutureBuilder<String>(
+                      future: _siteNameFuture,
+                      builder: (context, snapshot) {
+                        final name = snapshot.data;
+                        return Text(
+                          (name == null || name.isEmpty) ? '小黑云' : name,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '欢迎回来，$username~',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
               ),

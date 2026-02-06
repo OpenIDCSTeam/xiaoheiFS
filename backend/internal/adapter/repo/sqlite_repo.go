@@ -2437,6 +2437,59 @@ func (r *SQLiteRepo) MarkAllRead(ctx context.Context, userID int64) error {
 	return err
 }
 
+func (r *SQLiteRepo) UpsertPushToken(ctx context.Context, token *domain.PushToken) error {
+	if token == nil {
+		return nil
+	}
+	if token.CreatedAt.IsZero() {
+		token.CreatedAt = time.Now()
+	}
+	if token.UpdatedAt.IsZero() {
+		token.UpdatedAt = time.Now()
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO push_tokens(user_id, platform, token, device_id, created_at, updated_at)
+		VALUES (?,?,?,?,?,?)
+		ON CONFLICT(user_id, token) DO UPDATE SET
+			platform = excluded.platform,
+			device_id = excluded.device_id,
+			updated_at = excluded.updated_at
+	`, token.UserID, token.Platform, token.Token, token.DeviceID, token.CreatedAt, token.UpdatedAt)
+	return err
+}
+
+func (r *SQLiteRepo) DeletePushToken(ctx context.Context, userID int64, token string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM push_tokens WHERE user_id = ? AND token = ?`, userID, token)
+	return err
+}
+
+func (r *SQLiteRepo) ListPushTokensByUserIDs(ctx context.Context, userIDs []int64) ([]domain.PushToken, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, 0, len(userIDs))
+	args := make([]any, 0, len(userIDs))
+	for _, id := range userIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	query := `SELECT id, user_id, platform, token, device_id, created_at, updated_at FROM push_tokens WHERE user_id IN (` + strings.Join(placeholders, ",") + `)`
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.PushToken
+	for rows.Next() {
+		var item domain.PushToken
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Platform, &item.Token, &item.DeviceID, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 func (r *SQLiteRepo) CreateRealNameVerification(ctx context.Context, record *domain.RealNameVerification) error {
 	res, err := r.db.ExecContext(ctx, `INSERT INTO realname_verifications(user_id, real_name, id_number, status, provider, reason, verified_at) VALUES (?,?,?,?,?,?,?)`,
 		record.UserID, record.RealName, record.IDNumber, record.Status, record.Provider, record.Reason, record.VerifiedAt)
@@ -3058,6 +3111,7 @@ var (
 	_ usecase.UploadRepository             = (*SQLiteRepo)(nil)
 	_ usecase.TicketRepository             = (*SQLiteRepo)(nil)
 	_ usecase.NotificationRepository       = (*SQLiteRepo)(nil)
+	_ usecase.PushTokenRepository          = (*SQLiteRepo)(nil)
 	_ usecase.WalletRepository             = (*SQLiteRepo)(nil)
 	_ usecase.WalletOrderRepository        = (*SQLiteRepo)(nil)
 )

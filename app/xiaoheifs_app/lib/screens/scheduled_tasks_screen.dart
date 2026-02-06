@@ -58,33 +58,118 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
             ],
           ),
           body: ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             itemCount: items.isEmpty ? 1 : items.length,
             itemBuilder: (context, index) {
               if (items.isEmpty) {
                 return const Center(child: Text('暂无任务'));
               }
               final item = items[index];
-              return Card(
-                child: ListTile(
-                  title: Text(item.name),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(item.description),
-                      const SizedBox(height: 4),
-                      Text('策略：${item.strategy}'),
-                      Text('上次：${_formatLocal(item.lastRunAt)}'),
-                      Text('下次：${_formatLocal(item.nextRunAt)}'),
-                      if (item.lastStatus.isNotEmpty)
-                        Text('状态：${item.lastStatus}${item.lastError.isNotEmpty ? ' · ${item.lastError}' : ''}'),
-                    ],
-                  ),
-                  trailing: Switch(
-                    value: item.enabled,
-                    onChanged: _busy ? null : (value) => _toggle(item.key, value),
-                  ),
+              final theme = Theme.of(context);
+              final colorScheme = theme.colorScheme;
+              final statusColor =
+                  item.enabled ? const Color(0xFF00A68C) : const Color(0xFF546E7A);
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
                   onTap: () => _openConfig(item),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: colorScheme.outlineVariant.withOpacity(0.5),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: colorScheme.shadow.withOpacity(0.05),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                Icons.schedule,
+                                color: statusColor,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.name,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    item.description,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              value: item.enabled,
+                              onChanged:
+                                  _busy ? null : (value) => _toggle(item.key, value),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            _InfoPill(
+                              label: item.strategy,
+                              color: colorScheme.primary,
+                            ),
+                            _InfoPill(
+                              label: '上次 ${_formatLocal(item.lastRunAt)}',
+                              color: colorScheme.onSurfaceVariant,
+                              outlined: true,
+                            ),
+                            _InfoPill(
+                              label: '下次 ${_formatLocal(item.nextRunAt)}',
+                              color: colorScheme.onSurfaceVariant,
+                              outlined: true,
+                            ),
+                          ],
+                        ),
+                        if (item.lastStatus.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '状态：${item.lastStatus}${item.lastError.isNotEmpty ? ' · ${item.lastError}' : ''}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: item.lastStatus.toLowerCase().contains('fail')
+                                  ? const Color(0xFFD32F2F)
+                                  : colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
@@ -178,6 +263,38 @@ class _ScheduledTasksScreenState extends State<ScheduledTasksScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool outlined;
+
+  const _InfoPill({
+    required this.label,
+    required this.color,
+    this.outlined = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: outlined ? Colors.transparent : color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: outlined ? Border.all(color: color.withOpacity(0.4)) : null,
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: outlined ? color : color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 }
 

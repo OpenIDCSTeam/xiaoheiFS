@@ -315,6 +315,22 @@ type NotificationRepository interface {
 	MarkAllRead(ctx context.Context, userID int64) error
 }
 
+type PushTokenRepository interface {
+	UpsertPushToken(ctx context.Context, token *domain.PushToken) error
+	DeletePushToken(ctx context.Context, userID int64, token string) error
+	ListPushTokensByUserIDs(ctx context.Context, userIDs []int64) ([]domain.PushToken, error)
+}
+
+type PushPayload struct {
+	Title string
+	Body  string
+	Data  map[string]string
+}
+
+type PushSender interface {
+	Send(ctx context.Context, serverKey string, tokens []string, payload PushPayload) error
+}
+
 type ServerStatus struct {
 	Hostname        string
 	OS              string

@@ -579,6 +579,16 @@ type Notification struct {
 	CreatedAt time.Time
 }
 
+type PushToken struct {
+	ID        int64
+	UserID    int64
+	Platform  string
+	Token     string
+	DeviceID  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type RealNameVerification struct {
 	ID         int64
 	UserID     int64

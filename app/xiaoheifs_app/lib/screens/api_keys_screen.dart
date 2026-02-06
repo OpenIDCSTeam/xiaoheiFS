@@ -114,59 +114,23 @@ class _ApiKeysScreenState extends State<ApiKeysScreen> {
           appBar: AppBar(
             title: const Text('API Keys'),
             actions: [
-              TextButton(onPressed: _reset, child: const Text('重置')),
-              TextButton(onPressed: _refresh, child: const Text('刷新')),
+              IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+              IconButton(onPressed: _reset, icon: const Icon(Icons.restart_alt)),
               IconButton(onPressed: _createKey, icon: const Icon(Icons.add)),
             ],
           ),
           body: ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _status.isEmpty ? null : _status,
-                              items: const [
-                                DropdownMenuItem(value: '', child: Text('全部')),
-                                DropdownMenuItem(value: 'active', child: Text('启用')),
-                                DropdownMenuItem(value: 'disabled', child: Text('禁用')),
-                              ],
-                              onChanged: (value) => _status = value ?? '',
-                              decoration: const InputDecoration(labelText: '状态'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _keywordController,
-                              decoration: const InputDecoration(labelText: 'Key Hash'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: () {
-                                _page = 1;
-                                _refresh();
-                              },
-                              child: const Text('筛选'),
-                            ),
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                ),
+              _ApiKeyFilterCard(
+                status: _status,
+                keywordController: _keywordController,
+                onStatusChanged: (value) => _status = value ?? '',
+                onSearch: () {
+                  _page = 1;
+                  _refresh();
+                },
+                onReset: _reset,
               ),
               const SizedBox(height: 12),
               if (items.isEmpty)
@@ -327,40 +291,244 @@ class _ApiKeyTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusColor = item.status == 'active' ? const Color(0xFF00A68C) : const Color(0xFF546E7A);
-    return Card(
-      child: ListTile(
-        title: Text(item.name.isEmpty ? 'API Key #${item.id}' : item.name),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('权限组：$permissionGroupName'),
-            const SizedBox(height: 4),
-            Text('Key Hash：${item.keyHash}'),
-          ],
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                item.status,
-                style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.w600),
-              ),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(height: 6),
-            Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Icon(Icons.vpn_key, color: statusColor),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                IconButton(onPressed: onCopy, icon: const Icon(Icons.copy, size: 18)),
-                IconButton(onPressed: onToggle, icon: const Icon(Icons.sync_alt, size: 18)),
+                Text(
+                  item.name.isEmpty ? 'API Key #${item.id}' : item.name,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '权限组：$permissionGroupName',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Key Hash：${item.keyHash}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
-          ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  item.status,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(onPressed: onCopy, icon: const Icon(Icons.copy, size: 18)),
+                  IconButton(onPressed: onToggle, icon: const Icon(Icons.sync_alt, size: 18)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ApiKeyFilterCard extends StatelessWidget {
+  final String status;
+  final TextEditingController keywordController;
+  final ValueChanged<String?> onStatusChanged;
+  final VoidCallback onSearch;
+  final VoidCallback onReset;
+
+  const _ApiKeyFilterCard({
+    required this.status,
+    required this.keywordController,
+    required this.onStatusChanged,
+    required this.onSearch,
+    required this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _StatusFilterChip(
+                  label: '全部',
+                  selected: status.isEmpty,
+                  onTap: () => onStatusChanged(''),
+                ),
+                const SizedBox(width: 8),
+                _StatusFilterChip(
+                  label: '启用',
+                  selected: status == 'active',
+                  onTap: () => onStatusChanged('active'),
+                ),
+                const SizedBox(width: 8),
+                _StatusFilterChip(
+                  label: '禁用',
+                  selected: status == 'disabled',
+                  onTap: () => onStatusChanged('disabled'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: keywordController,
+                  decoration: const InputDecoration(
+                    hintText: 'Key Hash',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilledButton.icon(
+                onPressed: onSearch,
+                icon: const Icon(Icons.search_rounded),
+                label: const Text('搜索'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onReset,
+                  icon: const Icon(Icons.restart_alt_rounded),
+                  label: const Text('重置'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusFilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _StatusFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = selected
+        ? colorScheme.primaryContainer.withOpacity(0.7)
+        : colorScheme.surface;
+    final borderColor = selected
+        ? colorScheme.primary
+        : colorScheme.outlineVariant.withOpacity(0.7);
+    final textColor =
+        selected ? colorScheme.primary : colorScheme.onSurface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                Icon(Icons.check_rounded, size: 16, color: textColor),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

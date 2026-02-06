@@ -20,188 +20,170 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Consumer<AppState>(
-      builder: (context, state, _) {
-        final session = state.session;
-        final username = session?.username ?? '管理员';
-        return ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Text(
-              '账户与系统',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _ProfileCard(username: username, session: session),
-            const SizedBox(height: 20),
-            Text(
-              '日志与接口',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _SettingTile(
-              icon: Icons.description,
-              title: '查看系统日志',
-              subtitle: '系统运行与异常记录',
-              onTap: () {
-                _showToast(context, '系统日志暂未接入');
-              },
-            ),
-            _SettingTile(
-              icon: Icons.list_alt,
-              title: '查看操作日志',
-              subtitle: '管理员操作记录',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AuditLogsScreen()),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.health_and_safety,
-              title: 'API 健康检查',
-              subtitle: '检查 /admin 接口状态',
-              onTap: () => _checkApiHealth(context),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              '管理模块',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _SettingTile(
-              icon: Icons.support_agent,
-              title: '工单管理',
-              subtitle: '查看与回复用户工单',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const TicketsScreen()),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.account_balance_wallet,
-              title: '钱包订单',
-              subtitle: '充值/退款审核',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const WalletOrdersScreen()),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.schedule,
-              title: '定时任务',
-              subtitle: '任务启停与配置',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const ScheduledTasksScreen(),
-                  ),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.vpn_key,
-              title: 'API Keys',
-              subtitle: '密钥创建与禁用',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ApiKeysScreen()),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.payments,
-              title: '支付渠道',
-              subtitle: '启用/停用支付方式',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const PaymentProvidersScreen(),
-                  ),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.settings_applications,
-              title: '系统设置',
-              subtitle: '配置键值管理',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsKvScreen()),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.category,
-              title: '商品与计费',
-              subtitle: '区域/线路/套餐/计费周期',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CatalogHubScreen()),
-                );
-              },
-            ),
-            _SettingTile(
-              icon: Icons.rule,
-              title: '权限列表',
-              subtitle: '系统权限定义',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PermissionsScreen()),
-                );
-              },
-            ),
-            const SizedBox(height: 20),
-            Text(
-              '账户操作',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.manage_accounts),
-                title: const Text('编辑资料 / API 配置'),
-                subtitle: Text(
-                  session?.authType == 'password'
-                      ? '修改邮箱与显示名'
-                      : '修改 API 地址与 Key',
-                ),
-                onTap: () => _openEditDialog(context, state),
-              ),
-            ),
-            Card(
-              color: const Color(0xFFFFF4F4),
-              child: ListTile(
-                leading: const Icon(Icons.logout, color: Color(0xFFD32F2F)),
-                title: const Text('退出登录'),
-                subtitle: const Text('清除本地登录信息'),
-                onTap: () async {
-                  await state.logout();
+    return Scaffold(
+      appBar: AppBar(
+        leading: const BackButton(),
+        title: const Text('设置'),
+      ),
+      body: Consumer<AppState>(
+        builder: (context, state, _) {
+          final session = state.session;
+          final username = session?.username ?? '管理员';
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            children: [
+              const _SectionHeader(title: '账户与系统', icon: Icons.account_circle),
+              const SizedBox(height: 8),
+              _ProfileCard(username: username, session: session),
+              const SizedBox(height: 16),
+              const _SectionHeader(title: '日志与接口', icon: Icons.receipt_long),
+              const SizedBox(height: 8),
+              _SettingTile(
+                icon: Icons.description,
+                title: '查看系统日志',
+                subtitle: '系统运行与异常记录',
+                onTap: () {
+                  _showToast(context, '系统日志暂未接入');
                 },
               ),
-            ),
-          ],
-        );
-      },
+              _SettingTile(
+                icon: Icons.list_alt,
+                title: '查看操作日志',
+                subtitle: '管理员操作记录',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AuditLogsScreen()),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.health_and_safety,
+                title: 'API 健康检查',
+                subtitle: '检查 /admin 接口状态',
+                onTap: () => _checkApiHealth(context),
+              ),
+              const SizedBox(height: 16),
+              const _SectionHeader(title: '管理模块', icon: Icons.dashboard_customize),
+              const SizedBox(height: 8),
+              _SettingTile(
+                icon: Icons.support_agent,
+                title: '工单管理',
+                subtitle: '查看与回复用户工单',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TicketsScreen()),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.account_balance_wallet,
+                title: '钱包订单',
+                subtitle: '充值/退款审核',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const WalletOrdersScreen()),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.schedule,
+                title: '定时任务',
+                subtitle: '任务启停与配置',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ScheduledTasksScreen(),
+                    ),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.vpn_key,
+                title: 'API Keys',
+                subtitle: '密钥创建与禁用',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ApiKeysScreen()),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.payments,
+                title: '支付渠道',
+                subtitle: '启用/停用支付方式',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const PaymentProvidersScreen(),
+                    ),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.settings_applications,
+                title: '系统设置',
+                subtitle: '配置键值管理',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsKvScreen()),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.category,
+                title: '商品与计费',
+                subtitle: '区域/线路/套餐/计费周期',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CatalogHubScreen()),
+                  );
+                },
+              ),
+              _SettingTile(
+                icon: Icons.rule,
+                title: '权限列表',
+                subtitle: '系统权限定义',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const PermissionsScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              const _SectionHeader(title: '账户操作', icon: Icons.manage_accounts),
+              const SizedBox(height: 8),
+              _SettingTile(
+                icon: Icons.manage_accounts,
+                title: '编辑资料 / API 配置',
+                subtitle: session?.authType == 'password'
+                    ? '修改邮箱与显示名'
+                    : '修改 API 地址与 Key',
+                onTap: () => _openEditDialog(context, state),
+              ),
+              Card(
+                color: const Color(0xFFFFF4F4),
+                child: ListTile(
+                  leading: const Icon(Icons.logout, color: Color(0xFFD32F2F)),
+                  title: const Text('退出登录'),
+                  subtitle: const Text('清除本地登录信息'),
+                  onTap: () async {
+                    await state.logout();
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -492,9 +474,16 @@ class _SettingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.5)),
+      ),
       child: ListTile(
-        leading: Icon(icon),
+        leading: Icon(icon, color: colorScheme.primary),
         title: Text(title),
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.chevron_right),
@@ -506,6 +495,38 @@ class _SettingTile extends StatelessWidget {
               ).showSnackBar(SnackBar(content: Text('打开 $title')));
             },
       ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+
+  const _SectionHeader({required this.title, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 18, color: colorScheme.primary),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          title,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
