@@ -1,10 +1,13 @@
 ﻿import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../constants/api_endpoints.dart';
 import '../navigation/app_navigator.dart';
 import '../storage/storage_service.dart';
+import 'api_client.dart';
 
 class AuthInterceptor extends Interceptor {
   final StorageService _storage = StorageService.instance;
+  static Future<String?>? _refreshing;
 
   @override
   void onRequest(
@@ -28,13 +31,59 @@ class AuthInterceptor extends Interceptor {
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
-    if (err.response?.statusCode == 401) {
+    if (err.response?.statusCode == 401 && err.requestOptions.extra['retried'] != true) {
+      final path = err.requestOptions.path;
+      final isAuthEndpoint =
+          path.contains(ApiEndpoints.authLogin) || path.contains(ApiEndpoints.authRefresh);
+
+      if (!isAuthEndpoint) {
+        final refreshToken = _storage.getRefreshToken();
+        if (refreshToken != null && refreshToken.isNotEmpty) {
+          _refreshing ??= _refreshToken(refreshToken);
+          final newToken = await _refreshing;
+          _refreshing = null;
+
+          if (newToken != null && newToken.isNotEmpty) {
+            final options = err.requestOptions;
+            options.headers['Authorization'] = 'Bearer $newToken';
+            options.extra['retried'] = true;
+            try {
+              final response = await ApiClient.instance.dio.fetch(options);
+              handler.resolve(response);
+              return;
+            } catch (_) {}
+          }
+        }
+      }
+
       await _storage.clearAuthData();
       AppNavigator.showSnackBar('鉴权失败，请重新登录');
       AppNavigator.goToLogin();
     }
 
     handler.next(err);
+  }
+
+  Future<String?> _refreshToken(String refreshToken) async {
+    try {
+      final baseUrl = ApiClient.instance.dio.options.baseUrl;
+      final dio = Dio(BaseOptions(baseUrl: baseUrl));
+      final response = await dio.post(
+        ApiEndpoints.authRefresh,
+        data: {'refresh_token': refreshToken},
+      );
+      final data = response.data is Map ? response.data as Map : {};
+      final access = data['access_token'] ?? data['accessToken'] ?? data['token'];
+      final newRefresh = data['refresh_token'] ?? data['refreshToken'];
+      if (access is String && access.isNotEmpty) {
+        await _storage.setAccessToken(access);
+        if (newRefresh is String && newRefresh.isNotEmpty) {
+          await _storage.setRefreshToken(newRefresh);
+        }
+        return access;
+      }
+    } catch (_) {}
+    return null;
   }
 }
 

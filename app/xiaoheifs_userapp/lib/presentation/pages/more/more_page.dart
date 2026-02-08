@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
@@ -59,8 +59,8 @@ class MorePage extends ConsumerWidget {
   }
 
   Widget _buildUserCard(BuildContext context, dynamic user) {
-    final avatar = user?.avatarUrl ?? user?.avatar_url;
-    final username = user?.username ?? '未登录';
+    final avatar = user?.avatarUrl ?? user?.avatar;
+    final username = user?.username ?? 'δ��¼';
     final email = user?.email ?? '';
     return Card(
       child: InkWell(
@@ -128,7 +128,7 @@ class MorePage extends ConsumerWidget {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.logout, color: AppColors.danger),
-        title: const Text('退出登录', style: TextStyle(color: AppColors.danger)),
+        title: const Text('�˳���¼', style: TextStyle(color: AppColors.danger)),
         onTap: () async {
           await ref.read(authProvider.notifier).logout();
           if (context.mounted) {
@@ -139,3 +139,5 @@ class MorePage extends ConsumerWidget {
     );
   }
 }
+
+

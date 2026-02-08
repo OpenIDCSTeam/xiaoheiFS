@@ -29,6 +29,24 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      - name: Cache Pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            C:\Users\runneradmin\AppData\Local\Pub\Cache
+          key: pub-${{ runner.os }}-${{ hashFiles('app/xiaoheifs_userapp/pubspec.lock') }}
+
+      - name: Cache Gradle
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/xiaoheifs_userapp/android/gradle/wrapper/gradle-wrapper.properties', 'app/xiaoheifs_userapp/android/build.gradle', 'app/xiaoheifs_userapp/android/settings.gradle.kts') }}
 
       - name: Pub get
         run: flutter pub get
@@ -62,6 +80,15 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      - name: Cache Pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            C:\Users\runneradmin\AppData\Local\Pub\Cache
+          key: pub-${{ runner.os }}-${{ hashFiles('app/xiaoheifs_userapp/pubspec.lock') }}
 
       - name: Pub get
         run: flutter pub get

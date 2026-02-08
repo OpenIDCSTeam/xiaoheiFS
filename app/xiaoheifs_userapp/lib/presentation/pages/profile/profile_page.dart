@@ -1,4 +1,4 @@
-ï»¿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
@@ -6,7 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../widgets/common/app_button.dart';
 import '../../widgets/common/app_input.dart';
 
-/// ä¸ªäººè®¾ç½®é¡µé¢
+/// ¸öÈËÉèÖÃÒ³Ãæ
 class ProfilePage extends ConsumerWidget {
   const ProfilePage({super.key});
 
@@ -16,7 +16,7 @@ class ProfilePage extends ConsumerWidget {
     final user = authState.user;
 
     if (user == null) {
-      return const Center(child: Text('è¯·å…ˆç™»å½•'));
+      return const Center(child: Text('ÇëÏÈµÇÂ¼'));
     }
 
     return Scaffold(
@@ -30,11 +30,11 @@ class ProfilePage extends ConsumerWidget {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
-            // ç”¨æˆ·ä¿¡æ¯å¡ç‰‡
+            // ÓÃ»§ĞÅÏ¢¿¨Æ¬
             _buildUserInfoCard(user),
             const SizedBox(height: 24),
 
-            // ç¼–è¾‘è¡¨å•
+            // ±à¼­±íµ¥
             _buildEditForm(context, ref, user),
           ],
         ),
@@ -43,7 +43,7 @@ class ProfilePage extends ConsumerWidget {
   }
 
   Widget _buildUserInfoCard(dynamic user) {
-    final avatar = user.avatarUrl ?? user.avatar_url;
+    final avatar = user.avatarUrl ?? user.avatar;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -107,7 +107,7 @@ class ProfilePage extends ConsumerWidget {
           children: [
             AppInput(
               label: AppStrings.email,
-              hint: 'è¯·è¾“å…¥é‚®ç®±',
+              hint: 'ÇëÊäÈëÓÊÏä',
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
               prefixIcon: const Icon(Icons.email_outlined),
@@ -117,7 +117,7 @@ class ProfilePage extends ConsumerWidget {
 
             AppInput(
               label: AppStrings.phone,
-              hint: 'è¯·è¾“å…¥æ‰‹æœºå·',
+              hint: 'ÇëÊäÈëÊÖ»úºÅ',
               controller: phoneController,
               keyboardType: TextInputType.phone,
               prefixIcon: const Icon(Icons.phone_outlined),
@@ -127,7 +127,7 @@ class ProfilePage extends ConsumerWidget {
 
             AppInput(
               label: AppStrings.qq,
-              hint: 'è¯·è¾“å…¥QQå·',
+              hint: 'ÇëÊäÈëQQºÅ',
               controller: qqController,
               keyboardType: TextInputType.number,
               prefixIcon: const Icon(Icons.chat_bubble_outline),
@@ -137,7 +137,7 @@ class ProfilePage extends ConsumerWidget {
 
             AppInput(
               label: AppStrings.bio,
-              hint: 'è¯·è¾“å…¥ä¸ªäººç®€ä»‹',
+              hint: 'ÇëÊäÈë¸öÈË¼ò½é',
               controller: bioController,
               maxLines: 3,
               prefixIcon: const Icon(Icons.edit_note),
@@ -157,13 +157,13 @@ class ProfilePage extends ConsumerWidget {
                   });
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('ä¿å­˜æˆåŠŸ')),
+                      const SnackBar(content: Text('±£´æ³É¹¦')),
                     );
                   }
                 } catch (e) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('ä¿å­˜å¤±è´¥: $e')),
+                      SnackBar(content: Text('±£´æÊ§°Ü: $e')),
                     );
                   }
                 }
@@ -175,3 +175,5 @@ class ProfilePage extends ConsumerWidget {
     );
   }
 }
+
+

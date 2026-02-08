@@ -1,4 +1,4 @@
-﻿import 'dart:ui';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,8 +10,8 @@ import '../../providers/notification_provider.dart';
 import '../../providers/refresh_provider.dart';
 import '../../providers/site_provider.dart';
 
-/// 主布局
-/// 包含侧边栏/顶部栏/底部导航
+/// 涓诲竷灞€
+/// 鍖呭惈渚ц竟鏍?椤堕儴鏍?搴曢儴瀵艰埅
 class MainLayout extends ConsumerStatefulWidget {
   final Widget child;
 
@@ -157,11 +157,41 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
 
     if (isDesktop) {
       final selectedIndex = _desktopIndexForLocation(location);
-      return _buildDesktopLayout(user, selectedIndex, unreadCount, location, siteName);
+      return _wrapBackHandler(
+        isDesktop: true,
+        selectedIndex: selectedIndex,
+        child: _buildDesktopLayout(user, selectedIndex, unreadCount, location, siteName),
+      );
     }
 
     final selectedIndex = _mobileIndexForLocation(location);
-    return _buildMobileLayout(user, selectedIndex, unreadCount, location, siteName);
+    return _wrapBackHandler(
+      isDesktop: false,
+      selectedIndex: selectedIndex,
+      child: _buildMobileLayout(user, selectedIndex, unreadCount, location, siteName),
+    );
+  }
+
+  Widget _wrapBackHandler({
+    required bool isDesktop,
+    required int selectedIndex,
+    required Widget child,
+  }) {
+    return WillPopScope(
+      onWillPop: () async {
+        final canPop = Navigator.of(context).canPop();
+        if (canPop) {
+          Navigator.of(context).pop();
+          return false;
+        }
+        if (!isDesktop && selectedIndex != 0) {
+          _onDestinationSelected(0, _mobilePrimaryItems);
+          return false;
+        }
+        return true;
+      },
+      child: child,
+    );
   }
 
   int _desktopIndexForLocation(String location) {
@@ -199,8 +229,9 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
     String siteName,
   ) {
     return Scaffold(
-      body: Row(
-        children: [
+      body: SafeArea(
+        child: Row(
+          children: [
           NavigationRail(
             selectedIndex: selectedIndex,
             onDestinationSelected: (index) => _onDestinationSelected(index, _desktopItems),
@@ -238,7 +269,8 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
               ],
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -252,11 +284,13 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
   ) {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: Column(
-        children: [
-          _buildMobileTopBar(user, unreadCount, route, siteName),
-          Expanded(child: widget.child),
-        ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildMobileTopBar(user, unreadCount, route, siteName),
+            Expanded(child: widget.child),
+          ],
+        ),
       ),
       bottomNavigationBar: ClipRect(
         child: BackdropFilter(
@@ -423,7 +457,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
   }
 
   Widget _buildUserMenu(dynamic user) {
-    final avatar = user?.avatarUrl ?? user?.avatar_url;
+    final avatar = user?.avatarUrl ?? user?.avatar;
     return PopupMenuButton<String>(
       icon: CircleAvatar(
         backgroundColor: AppColors.primaryLight,
@@ -468,7 +502,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
   }
 }
 
-/// 导航项配置类
+/// 瀵艰埅椤归厤缃被
 class NavigationItem {
   final IconData icon;
   final IconData selectedIcon;
@@ -482,6 +516,8 @@ class NavigationItem {
     required this.route,
   });
 }
+
+
 
 
 

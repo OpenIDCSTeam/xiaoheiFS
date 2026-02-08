@@ -33,9 +33,16 @@ class MyApp extends ConsumerWidget {
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
-      title: '小黑云服务',
+      title: '云享互联',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: AppNavigator.messengerKey,
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(textScaler: const TextScaler.linear(1.0)),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.blue,
@@ -55,6 +62,7 @@ class MyApp extends ConsumerWidget {
     );
   }
 }
+
 
 
 

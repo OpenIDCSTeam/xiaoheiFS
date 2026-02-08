@@ -1,4 +1,4 @@
-Ôªøimport 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/api_config.dart';
 import '../../../core/constants/app_colors.dart';
@@ -9,7 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../widgets/common/app_button.dart';
 import '../../widgets/common/app_input.dart';
 
-/// ÁôªÂΩïÈ°µÈù¢
+/// µ«¬º“≥√Ê
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -165,14 +165,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                 ? Icons.expand_less
                                 : Icons.expand_more,
                             size: 20,
-                            color: AppColors.gray500,
+                            color: AppColors.gray400,
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            'È´òÁ∫ßËÆæÁΩÆ',
+                            '∏ﬂº∂…Ë÷√',
                             style: TextStyle(
                               fontSize: 14,
-                              color: AppColors.gray500,
+                              color: AppColors.gray400,
                             ),
                           ),
                         ],
@@ -278,7 +278,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         ),
         const SizedBox(height: 8),
         Text(
-          'ËØ∑ÁôªÂΩïÊÇ®ÁöÑË¥¶Êà∑',
+          '«Îµ«¬ºƒ˙µƒ’Àªß',
           style: TextStyle(
             fontSize: 14,
             color: AppColors.gray400,
@@ -288,3 +288,4 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     );
   }
 }
+
