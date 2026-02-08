@@ -1,15 +1,15 @@
-/// 验证器工具类
+﻿/// 验证器工具类
 class Validators {
   Validators._();
 
   /// 验证用户名
-  /// 长度3-20字符，只能包含字母、数字、下划线
+  /// 长度 3-20 字符，只能包含字母、数字、下划线
   static String? validateUsername(String? value) {
     if (value == null || value.isEmpty) {
       return '请输入用户名';
     }
     if (value.length < 3 || value.length > 20) {
-      return '用户名长度应为3-20个字符';
+      return '用户名长度应为 3-20 个字符';
     }
     if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
       return '用户名只能包含字母、数字和下划线';
@@ -18,13 +18,12 @@ class Validators {
   }
 
   /// 验证密码
-  /// 最小长度6位
   static String? validatePassword(String? value) {
     if (value == null || value.isEmpty) {
       return '请输入密码';
     }
     if (value.length < 6) {
-      return '密码长度至少6位';
+      return '密码长度至少 6 位';
     }
     return null;
   }
@@ -34,7 +33,7 @@ class Validators {
     if (value == null || value.isEmpty) {
       return '请输入邮箱';
     }
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+    if (!RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$').hasMatch(value)) {
       return '请输入有效的邮箱地址';
     }
     return null;
@@ -51,7 +50,7 @@ class Validators {
     return null;
   }
 
-  /// 验证QQ号
+  /// 验证 QQ 号
   static String? validateQQ(String? value) {
     if (value == null || value.isEmpty) {
       return '请输入QQ号';
@@ -70,14 +69,13 @@ class Validators {
     if (value.length != 18) {
       return '身份证号应为18位';
     }
-    // 简单验证格式
     if (!RegExp(r'^\d{17}[\dXx]$').hasMatch(value)) {
       return '请输入有效的身份证号';
     }
     return null;
   }
 
-  /// 验证URL
+  /// 验证 URL
   static String? validateUrl(String? value) {
     if (value == null || value.isEmpty) {
       return '请输入URL';

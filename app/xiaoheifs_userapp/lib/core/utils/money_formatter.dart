@@ -9,7 +9,7 @@ class MoneyFormatter {
   /// [currency] 货币代码，默认 CNY
   /// [decimalDigits] 小数位数，默认 2 位
   static String format(
-    double? amount, {
+    num? amount, {
     String currency = '¥',
     int decimalDigits = 2,
   }) {
@@ -21,27 +21,28 @@ class MoneyFormatter {
       customPattern: '#,##0.00',
     );
 
-    return formatter.format(amount);
+    return formatter.format(amount.toDouble());
   }
 
   /// 简洁格式化金额（不带货币符号）
-  static String formatSimple(double? amount, {int decimalDigits = 2}) {
+  static String formatSimple(num? amount, {int decimalDigits = 2}) {
     if (amount == null) return '0.00';
 
     final formatter = NumberFormat('#,##0.00', 'en_US');
-    return formatter.format(amount);
+    return formatter.format(amount.toDouble());
   }
 
   /// 格式化为千分位（如：1.2K, 1.5M）
-  static String formatCompact(double? amount) {
+  static String formatCompact(num? amount) {
     if (amount == null) return '0';
 
-    if (amount >= 1000000) {
-      return '${(amount / 1000000).toStringAsFixed(1)}M';
-    } else if (amount >= 1000) {
-      return '${(amount / 1000).toStringAsFixed(1)}K';
+    final value = amount.toDouble();
+    if (value >= 1000000) {
+      return '${(value / 1000000).toStringAsFixed(1)}M';
+    } else if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(1)}K';
     } else {
-      return amount.toStringAsFixed(0);
+      return value.toStringAsFixed(0);
     }
   }
 

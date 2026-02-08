@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../providers/auth_provider.dart';
@@ -14,6 +15,7 @@ class ProfilePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
     final user = authState.user;
+    final isMobileLike = MediaQuery.of(context).size.width <= 1024;
 
     if (user == null) {
       return const Center(child: Text('请先登录'));
@@ -23,16 +25,21 @@ class ProfilePage extends ConsumerWidget {
       text: _sanitizeProfileValue(user.email?.toString()),
     );
     final phoneController = TextEditingController(
-      text: _sanitizeProfileValue(user.phone?.toString()),
+      text: _sanitizePhone(user.phone?.toString()),
     );
     final qqController = TextEditingController(
-      text: _sanitizeProfileValue(user.qq?.toString()),
+      text: _sanitizeQq(user.qq?.toString()),
     );
     final bioController = TextEditingController(
       text: _sanitizeProfileValue(user.bio?.toString()),
-    );
-
-    return Scaffold(
+    );    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && isMobileLike) {
+          context.go('/console/more');
+        }
+      },
+      child: Scaffold(
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -56,6 +63,7 @@ class ProfilePage extends ConsumerWidget {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -72,6 +80,22 @@ class ProfilePage extends ConsumerWidget {
     }
 
     return value;
+  }
+
+  static String _sanitizePhone(String? raw) {
+    final digits = (raw ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return '';
+    if (digits.length == 11 && digits.startsWith('1')) return digits;
+    return '';
+  }
+
+  static String _sanitizeQq(String? raw) {
+    final digits = (raw ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return '';
+    if (digits.length >= 5 && digits.length <= 11 && !digits.startsWith('0')) {
+      return digits;
+    }
+    return '';
   }
 
   Widget _buildUserInfoCard(dynamic user) {
@@ -201,3 +225,4 @@ class ProfilePage extends ConsumerWidget {
     );
   }
 }
+

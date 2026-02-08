@@ -54,6 +54,7 @@ class AppButton extends StatelessWidget {
                 backgroundColor: effectiveColor,
                 foregroundColor: effectiveTextColor,
                 disabledBackgroundColor: AppColors.gray300,
+                enableFeedback: true,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(borderRadius),
                 ),

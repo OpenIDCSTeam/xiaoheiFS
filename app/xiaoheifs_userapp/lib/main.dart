@@ -70,13 +70,17 @@ class MyApp extends ConsumerWidget {
           ),
         );
 
-        return ClipRect(
-          child: Transform.scale(
-            scale: scale,
+        return SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.fill,
             alignment: Alignment.topLeft,
             child: MediaQuery(
               data: scaledMedia,
-              child: baseChild,
+              child: SizedBox(
+                width: media.size.width / scale,
+                height: media.size.height / scale,
+                child: baseChild,
+              ),
             ),
           ),
         );

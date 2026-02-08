@@ -2,6 +2,7 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../core/storage/storage_service.dart';
 import '../../data/repositories/vps_repository.dart';
 
 class VpsListState {
@@ -202,7 +203,15 @@ class VpsMonitorState {
 
 class VpsMonitorNotifier extends StateNotifier<VpsMonitorState> {
   VpsMonitorNotifier(this._ref, this._repo, this._id) : super(const VpsMonitorState()) {
+    _instances.add(this);
     _startPolling();
+  }
+
+  static final Set<VpsMonitorNotifier> _instances = <VpsMonitorNotifier>{};
+  static void stopAllActivePolling() {
+    for (final notifier in _instances.toList()) {
+      notifier.stopPolling();
+    }
   }
 
   final Ref _ref;
@@ -222,6 +231,11 @@ class VpsMonitorNotifier extends StateNotifier<VpsMonitorState> {
   }
 
   Future<void> fetchOnce({bool silent = false}) async {
+    final token = StorageService.instance.getAccessToken();
+    if (token == null || token.isEmpty) {
+      stopPolling();
+      return;
+    }
     final currentDetail = _ref.read(vpsDetailProvider).detail;
     final currentId = currentDetail?['id'] ?? currentDetail?['ID'];
     if (currentId != null && currentId.toString() != _id.toString()) {
@@ -251,6 +265,10 @@ class VpsMonitorNotifier extends StateNotifier<VpsMonitorState> {
         trafficOut: state.trafficOut.push(trafficOut),
       );
     } catch (e) {
+      final message = e.toString().toLowerCase();
+      if (message.contains('401') || message.contains('invalid token') || message.contains('unauthorized')) {
+        stopPolling();
+      }
       if (!silent) {
         state = state.copyWith(loading: false, error: e.toString());
       }
@@ -265,6 +283,7 @@ class VpsMonitorNotifier extends StateNotifier<VpsMonitorState> {
 
   @override
   void dispose() {
+    _instances.remove(this);
     stopPolling();
     super.dispose();
   }

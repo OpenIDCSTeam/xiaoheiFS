@@ -14,16 +14,24 @@ class TicketDetailPage extends ConsumerStatefulWidget {
 
 class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
   final _messageController = TextEditingController();
+  final _messageScrollController = ScrollController();
+  int _lastMessageCount = 0;
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(ticketDetailProvider.notifier).fetchDetail(widget.id));
+    Future.microtask(() async {
+      await ref.read(ticketDetailProvider.notifier).fetchDetail(widget.id);
+      if (mounted) {
+        _jumpToBottomInstant();
+      }
+    });
   }
 
   @override
   void dispose() {
     _messageController.dispose();
+    _messageScrollController.dispose();
     super.dispose();
   }
 
@@ -46,6 +54,13 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
     final subject = ticket['subject'] ?? ticket['Subject'] ?? '';
     final status = ticket['status'] ?? ticket['Status'] ?? '';
     final createdAt = ticket['created_at'] ?? ticket['CreatedAt'] ?? '';
+    final isClosed = status.toString().toLowerCase() == 'closed';
+    final messages = ref.watch(ticketDetailProvider.select((s) => s.messages));
+
+    if (messages.length != _lastMessageCount) {
+      _lastMessageCount = messages.length;
+      _jumpToBottomInstant();
+    }
 
     return Column(
       children: [
@@ -80,14 +95,17 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
           ),
         ),
         Expanded(
-          child: _MessageList(messages: ref.watch(ticketDetailProvider.select((s) => s.messages))),
+          child: _MessageList(
+            messages: messages,
+            controller: _messageScrollController,
+          ),
         ),
-        _buildInputBar(context),
+        _buildInputBar(context, isClosed: isClosed),
       ],
     );
   }
 
-  Widget _buildInputBar(BuildContext context) {
+  Widget _buildInputBar(BuildContext context, {required bool isClosed}) {
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -100,8 +118,9 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
             Expanded(
               child: TextField(
                 controller: _messageController,
-                decoration: const InputDecoration(
-                  hintText: '输入回复内容',
+                enabled: !isClosed,
+                decoration: InputDecoration(
+                  hintText: isClosed ? '工单已关闭，无法回复' : '输入回复内容',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
@@ -109,7 +128,7 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
             ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
-              onPressed: () => _sendMessage(context),
+              onPressed: isClosed ? null : () => _sendMessage(context),
               icon: const Icon(Icons.send, size: 16),
               label: const Text(AppStrings.sendMessage),
             ),
@@ -120,12 +139,15 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
   }
 
   Future<void> _sendMessage(BuildContext context) async {
+    final status = ref.read(ticketDetailProvider).ticket?['status']?.toString().toLowerCase() ?? '';
+    if (status == 'closed') return;
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
     try {
       await ref.read(ticketDetailProvider.notifier).addMessage(widget.id, text);
       if (mounted) {
         _messageController.clear();
+        _jumpToBottomInstant();
       }
     } catch (e) {
       if (mounted) {
@@ -152,15 +174,36 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
       }
     }
   }
+
+  void _jumpToBottomInstant() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_messageScrollController.hasClients) return;
+      final target = _messageScrollController.position.maxScrollExtent;
+      _messageScrollController.jumpTo(target);
+
+      // Double-pass to handle late layout updates after rebuild.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_messageScrollController.hasClients) return;
+        final target2 = _messageScrollController.position.maxScrollExtent;
+        if ((_messageScrollController.offset - target2).abs() > 1) {
+          _messageScrollController.jumpTo(target2);
+        }
+      });
+    });
+  }
 }
 
 class _MessageList extends StatelessWidget {
   final List<Map<String, dynamic>> messages;
-  const _MessageList({required this.messages});
+  final ScrollController controller;
+  const _MessageList({required this.messages, required this.controller});
 
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
+      controller: controller,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: messages.length,
       itemBuilder: (context, index) {

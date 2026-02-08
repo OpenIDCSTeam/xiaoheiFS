@@ -1,6 +1,7 @@
 ﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -190,7 +191,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
         const SizedBox(width: 8),
         const Expanded(
           child: Text(
-            '��������',
+            '订单详情',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
         ),
@@ -214,18 +215,29 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
       ),
       child: Row(
         children: [
-          _statItem(Icons.description, '������', orderNo),
+          _statItem(
+            Icons.description,
+            '订单号',
+            orderNo,
+            onValueTap: orderNo.isEmpty ? null : () => _copyOrderNo(orderNo),
+          ),
           _divider(),
-          _statItem(Icons.payments, '�������', total, valueColor: amountColor, valueSize: 18),
+          _statItem(Icons.payments, '订单金额', total, valueColor: amountColor, valueSize: 18),
           _divider(),
-          _statItem(Icons.schedule, '����ʱ��', createdAt),
+          _statItem(Icons.schedule, '创建时间', createdAt),
         ],
       ),
     );
   }
 
-  Widget _statItem(IconData icon, String label, String value,
-      {Color? valueColor, double valueSize = 14}) {
+  Widget _statItem(
+    IconData icon,
+    String label,
+    String value, {
+    Color? valueColor,
+    double valueSize = 14,
+    VoidCallback? onValueTap,
+  }) {
     return Expanded(
       child: Row(
         children: [
@@ -237,20 +249,42 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
               children: [
                 Text(label, style: const TextStyle(fontSize: 12, color: AppColors.gray500)),
                 const SizedBox(height: 4),
-                Text(
-                  value.isEmpty ? '-' : value,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: valueSize,
-                    color: valueColor ?? AppColors.gray100,
+                GestureDetector(
+                  onTap: onValueTap,
+                  behavior: HitTestBehavior.opaque,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          value.isEmpty ? '-' : value,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: valueSize,
+                            color: valueColor ?? AppColors.gray100,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (onValueTap != null) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.copy, size: 14, color: AppColors.gray500),
+                      ],
+                    ],
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _copyOrderNo(String orderNo) async {
+    await Clipboard.setData(ClipboardData(text: orderNo));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('订单号已复制')),
     );
   }
 
@@ -265,38 +299,66 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
 
   Widget _buildProgressSection(int stepIndex) {
     final steps = const [
-      '�ݸ�',
-      '��֧��',
-      '�����',
-      '��ͨ��',
-      '��ͨ��',
-      '�����',
+      '草稿',
+      '待支付',
+      '待审核',
+      '已通过',
+      '开通中',
+      '已生效',
     ];
-    final progress = steps.length <= 1 ? 0.0 : stepIndex / (steps.length - 1);
+    final current = stepIndex.clamp(0, steps.length - 1);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('��������', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: progress.clamp(0, 1),
-                minHeight: 8,
-                backgroundColor: AppColors.gray200,
-                color: AppColors.primary,
-              ),
+            Row(
+              children: [
+                const Text('订单进度', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '当前：${steps[current]}',
+                    style: const TextStyle(
+                      color: AppColors.primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: List.generate(steps.length, (index) {
-                final active = index <= stepIndex;
-                return _stepChip(steps[index], active);
+            const SizedBox(height: 14),
+            Row(
+              children: List.generate(steps.length * 2 - 1, (i) {
+                if (i.isOdd) {
+                  final connectorIndex = i ~/ 2;
+                  final done = connectorIndex < current;
+                  return Expanded(
+                    child: Container(
+                      height: 2,
+                      margin: const EdgeInsets.only(bottom: 18),
+                      color: done ? AppColors.success : AppColors.gray700,
+                    ),
+                  );
+                }
+                final index = i ~/ 2;
+                final isDone = index < current;
+                final isCurrent = index == current;
+                return Expanded(
+                  child: _progressNode(
+                    label: steps[index],
+                    index: index,
+                    isDone: isDone,
+                    isCurrent: isCurrent,
+                  ),
+                );
               }),
             ),
           ],
@@ -305,24 +367,62 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     );
   }
 
-  Widget _stepChip(String label, bool active) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: active ? AppColors.primary.withOpacity(0.15) : AppColors.darkSurface.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: active ? AppColors.primary : AppColors.gray700.withOpacity(0.4)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: active ? AppColors.primary : AppColors.gray500,
+  Widget _progressNode({
+    required String label,
+    required int index,
+    required bool isDone,
+    required bool isCurrent,
+  }) {
+    final bg = isDone
+        ? AppColors.success
+        : isCurrent
+            ? AppColors.primary
+            : AppColors.darkSurface.withOpacity(0.8);
+    final border = isDone
+        ? AppColors.success
+        : isCurrent
+            ? AppColors.primary
+            : AppColors.gray700;
+    final labelColor = isDone
+        ? AppColors.success
+        : isCurrent
+            ? AppColors.primary
+            : AppColors.gray500;
+    return Column(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: bg,
+            shape: BoxShape.circle,
+            border: Border.all(color: border),
+          ),
+          alignment: Alignment.center,
+          child: isDone
+              ? const Icon(Icons.check, size: 16, color: Colors.white)
+              : Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: isCurrent ? Colors.white : AppColors.gray400,
+                  ),
+                ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
+            color: labelColor,
+          ),
+        ),
+      ],
     );
   }
+
 
   Widget _buildActions(BuildContext context, String status, dynamic total) {
     return Wrap(
@@ -361,7 +461,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
               children: [
                 const Icon(Icons.list_alt, size: 18, color: AppColors.primary),
                 const SizedBox(width: 6),
-                const Text('������ϸ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('商品详情', style: TextStyle(fontWeight: FontWeight.bold)),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -369,16 +469,16 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                     color: AppColors.primary.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text('${items.length} ����Ʒ', style: const TextStyle(fontSize: 12)),
+                  child: Text('${items.length} 个商品', style: const TextStyle(fontSize: 12)),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             if (items.isEmpty)
-              const Text('���޶�����')
+              const Text('暂无订单项')
             else
               ...items.map((item) {
-                final name = item['name'] ?? item['Name'] ?? item['product_name'] ?? '��Ʒ';
+                final name = item['name'] ?? item['Name'] ?? item['product_name'] ?? '商品';
                 final amount = item['amount'] ?? item['price'] ?? 0;
                 final qty = item['qty'] ?? item['quantity'] ?? 1;
                 final status = item['status'] ?? item['Status'] ?? '';
@@ -392,7 +492,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                       const SizedBox(height: 4),
                       Text(specText, style: const TextStyle(color: AppColors.gray500)),
                       const SizedBox(height: 4),
-                      Text('����: $qty', style: const TextStyle(color: AppColors.gray500)),
+                      Text('数量: $qty', style: const TextStyle(color: AppColors.gray500)),
                     ],
                   ),
                   trailing: Column(
@@ -420,10 +520,10 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('֧����¼', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('支付记录', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             if (payments.isEmpty)
-              const Text('����֧����¼')
+              const Text('暂无支付记录')
             else
               ...payments.map((p) {
                 final method = p['method'] ?? p['Method'] ?? '';
@@ -544,12 +644,12 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     final parts = <String>[];
     if (totalCores > 0 || totalMem > 0 || totalDisk > 0 || totalBw > 0) {
       parts.add('CPU $totalCores');
-      parts.add('�ڴ� ${totalMem}G');
-      parts.add('���� ${totalDisk}G');
-      parts.add('���� ${totalBw}M');
+      parts.add('内存 ${totalMem}G');
+      parts.add('磁盘 ${totalDisk}G');
+      parts.add('带宽 ${totalBw}M');
     }
     if (duration != null && duration.toString().isNotEmpty) {
-      parts.add('ʱ�� $duration ����');
+      parts.add('时长 $duration 个月');
     }
     return parts.isEmpty ? '-' : parts.join(' / ');
   }
@@ -558,7 +658,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     try {
       await ref.read(orderRepositoryProvider).cancelOrder(widget.id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('������ȡ��')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('订单已取消')));
         await ref.read(orderDetailProvider.notifier).fetchDetail(widget.id);
       }
     } catch (e) {
@@ -604,18 +704,18 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => AlertDialog(
-          title: const Text('����֧��'),
+          title: const Text('发起支付'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   value: method,
-                  decoration: const InputDecoration(labelText: '֧����ʽ'),
+                  decoration: const InputDecoration(labelText: '支付方式'),
                   items: _paymentProviders
                       .map((e) => DropdownMenuItem<String>(
                             value: e['key']?.toString() ?? e['code']?.toString(),
-                            child: Text(e['name']?.toString() ?? e['label']?.toString() ?? '��ʽ'),
+                            child: Text(e['name']?.toString() ?? e['label']?.toString() ?? '方式'),
                           ))
                       .toList(),
                   onChanged: (value) {
@@ -640,12 +740,12 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                 TextField(
                   controller: amountController,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: '֧�����'),
+                  decoration: const InputDecoration(labelText: '支付金额'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: noteController,
-                  decoration: const InputDecoration(labelText: '��ע'),
+                  decoration: const InputDecoration(labelText: '备注'),
                 ),
                 if (schemaFields.isNotEmpty) const SizedBox(height: 12),
                 ...schemaFields.map((field) {
@@ -718,13 +818,13 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                 final amount = double.tryParse(amountController.text.trim()) ?? 0;
                 if (method == null || method!.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('��ѡ��֧����ʽ')),
+                    const SnackBar(content: Text('请选择支付方式')),
                   );
                   return;
                 }
                 if (amount <= 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('��������Ч���')),
+                    const SnackBar(content: Text('请输入有效金额')),
                   );
                   return;
                 }
@@ -734,7 +834,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                     final val = extraValues[key];
                     if (val == null || (val is String && val.trim().isEmpty)) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('����д${field['label'] ?? key}')),
+                        SnackBar(content: Text('请填写${field['label'] ?? key}')),
                       );
                       return;
                     }
@@ -755,7 +855,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
                     if (context.mounted) {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('���ύ������Ϣ')),
+                        const SnackBar(content: Text('已提交审核支付信息')),
                       );
                       await ref.read(orderDetailProvider.notifier).fetchDetail(widget.id);
                     }
@@ -815,7 +915,7 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
     final payUrl = extra['code_url'] ?? result['pay_url'] ?? result['payUrl'] ?? result['url'];
     final instructions = extra['instructions']?.toString();
 
-    // balance/approval ����ת��payUrl Ϊ������ʾ
+    // balance/approval 不跳转 payUrl，直接提示结果
     if (method == 'balance' || method == 'approval') {
       if (instructions != null && instructions.isNotEmpty && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -835,9 +935,10 @@ class _OrderDetailPageState extends ConsumerState<OrderDetailPage> {
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('֧������Ϊ��')),
+        const SnackBar(content: Text('支付地址为空')),
       );
     }
     return;
   }
 }
+

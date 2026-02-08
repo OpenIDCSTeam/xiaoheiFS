@@ -25,6 +25,35 @@ class MainLayout extends ConsumerStatefulWidget {
 }
 
 class _MainLayoutState extends ConsumerState<MainLayout> {
+  BoxDecoration _glassDecoration(
+    ColorScheme colorScheme, {
+    bool top = false,
+    bool bottom = false,
+  }) {
+    return BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          colorScheme.surface.withOpacity(0.56),
+          colorScheme.surface.withOpacity(0.36),
+        ],
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.28),
+          blurRadius: 20,
+          offset: const Offset(0, 6),
+        ),
+        BoxShadow(
+          color: Colors.white.withOpacity(0.05),
+          blurRadius: 10,
+          offset: const Offset(0, -1),
+        ),
+      ],
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -153,7 +182,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
     final unreadCount = ref.watch(notificationProvider.select((state) => state.unreadCount));
     final siteName = ref.watch(siteProvider.select((state) => state.siteName));
     final isDesktop = MediaQuery.of(context).size.width > 1024;
-    final location = GoRouterState.of(context).matchedLocation;
+    final location = GoRouterState.of(context).uri.path;
 
     if (isDesktop) {
       final selectedIndex = _desktopIndexForLocation(location);
@@ -308,9 +337,9 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
       ),
       bottomNavigationBar: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
           child: Container(
-            color: colorScheme.surface.withOpacity(0.75),
+            decoration: _glassDecoration(colorScheme, top: true),
             child: BottomNavigationBar(
               currentIndex: selectedIndex,
               onTap: (index) => _onDestinationSelected(index, _mobilePrimaryItems),
@@ -370,12 +399,10 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
     final onSurface = colorScheme.onSurface;
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          decoration: BoxDecoration(
-            color: colorScheme.surface.withOpacity(0.75),
-          ),
+          decoration: _glassDecoration(colorScheme, bottom: true),
           child: Row(
             children: [
               Text(
@@ -399,20 +426,19 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
   Widget _buildMobileTopBar(dynamic user, int unreadCount, String route, String siteName) {
     final colorScheme = Theme.of(context).colorScheme;
     final onSurface = colorScheme.onSurface;
+    final isNarrow = MediaQuery.of(context).size.width < 390;
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: colorScheme.surface.withOpacity(0.75),
-          ),
+          padding: EdgeInsets.symmetric(horizontal: isNarrow ? 12 : 16, vertical: isNarrow ? 8 : 12),
+          decoration: _glassDecoration(colorScheme, bottom: true),
           child: Row(
             children: [
               Text(
                 siteName.isNotEmpty ? siteName : AppStrings.appTitle,
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: isNarrow ? 16 : 18,
                   fontWeight: FontWeight.bold,
                   color: onSurface,
                 ),

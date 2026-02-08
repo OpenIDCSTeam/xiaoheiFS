@@ -8,6 +8,7 @@ import 'api_client.dart';
 class AuthInterceptor extends Interceptor {
   final StorageService _storage = StorageService.instance;
   static Future<String?>? _refreshing;
+  static bool _unauthorizedHandled = false;
 
   @override
   void onRequest(
@@ -17,6 +18,7 @@ class AuthInterceptor extends Interceptor {
     final token = _storage.getAccessToken();
     if (token != null && token.isNotEmpty) {
       options.headers['Authorization'] = 'Bearer $token';
+      _unauthorizedHandled = false;
     }
 
     if (options.headers.containsKey('X-Use-Api-Key')) {
@@ -32,6 +34,10 @@ class AuthInterceptor extends Interceptor {
     ErrorInterceptorHandler handler,
   ) async {
     if (err.response?.statusCode == 401 && err.requestOptions.extra['retried'] != true) {
+      if (_unauthorizedHandled) {
+        handler.next(err);
+        return;
+      }
       final path = err.requestOptions.path;
       final isAuthEndpoint =
           path.contains(ApiEndpoints.authLogin) || path.contains(ApiEndpoints.authRefresh);
@@ -39,23 +45,29 @@ class AuthInterceptor extends Interceptor {
       if (!isAuthEndpoint) {
         final refreshToken = _storage.getRefreshToken();
         if (refreshToken != null && refreshToken.isNotEmpty) {
-          _refreshing ??= _refreshToken(refreshToken);
-          final newToken = await _refreshing;
-          _refreshing = null;
+          try {
+            _refreshing ??= _refreshToken(refreshToken);
+            final newToken = await _refreshing;
+            _refreshing = null;
 
-          if (newToken != null && newToken.isNotEmpty) {
-            final options = err.requestOptions;
-            options.headers['Authorization'] = 'Bearer $newToken';
-            options.extra['retried'] = true;
-            try {
-              final response = await ApiClient.instance.dio.fetch(options);
-              handler.resolve(response);
-              return;
-            } catch (_) {}
+            if (newToken != null && newToken.isNotEmpty) {
+              _unauthorizedHandled = false;
+              final options = err.requestOptions;
+              options.headers['Authorization'] = 'Bearer $newToken';
+              options.extra['retried'] = true;
+              try {
+                final response = await ApiClient.instance.dio.fetch(options);
+                handler.resolve(response);
+                return;
+              } catch (_) {}
+            }
+          } finally {
+            _refreshing = null;
           }
         }
       }
 
+      _unauthorizedHandled = true;
       await _storage.clearAuthData();
       AppNavigator.showSnackBar('鉴权失败，请重新登录');
       AppNavigator.goToLogin();

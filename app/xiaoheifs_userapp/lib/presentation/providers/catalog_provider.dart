@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../core/utils/map_utils.dart';
 
@@ -62,7 +63,9 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   CatalogNotifier(this._repo) : super(const CatalogState());
   final CatalogRepository _repo;
 
-  Future<void> fetchCatalog() async {
+  Future<void> fetchCatalog({bool force = false}) async {
+    if (state.loading && !force) return;
+    debugPrint('[Catalog] fetchCatalog(force: $force) start');
     state = state.copyWith(loading: true, error: null);
     try {
       final data = await _repo.fetchCatalog().timeout(const Duration(seconds: 20));
@@ -76,7 +79,11 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         systemImages: data.systemImages.map(_normalizeSystemImage).toList(),
         billingCycles: data.billingCycles.map(_normalizeBillingCycle).toList(),
       );
+      debugPrint(
+        '[Catalog] fetchCatalog success: goodsTypes=${state.goodsTypes.length}, regions=${state.regions.length}, planGroups=${state.planGroups.length}, packages=${state.packages.length}, cycles=${state.billingCycles.length}',
+      );
     } catch (e) {
+      debugPrint('[Catalog] fetchCatalog error: $e');
       state = state.copyWith(loading: false, error: e.toString());
     }
   }

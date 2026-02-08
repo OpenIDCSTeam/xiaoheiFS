@@ -3,6 +3,7 @@ import '../../core/network/api_client.dart';
 import '../../core/storage/storage_service.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/models/user.dart';
+import 'vps_provider.dart';
 
 enum AuthStatus {
   initial,
@@ -109,6 +110,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
+    VpsMonitorNotifier.stopAllActivePolling();
     await _authRepository.logout();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }

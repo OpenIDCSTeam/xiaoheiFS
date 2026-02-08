@@ -45,5 +45,9 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="ms-rd"/>
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="termius"/>
+        </intent>
     </queries>
 </manifest>

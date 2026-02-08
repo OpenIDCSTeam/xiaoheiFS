@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/map_utils.dart';
@@ -27,8 +28,10 @@ class CatalogRepository {
   final Dio _dio = ApiClient.instance.dio;
 
   Future<CatalogData> fetchCatalog() async {
+    debugPrint('[CatalogRepo] GET ${ApiClient.instance.dio.options.baseUrl}${ApiEndpoints.catalog}');
     final response = await _dio.get(ApiEndpoints.catalog);
-    final data = ensureMap(response.data);
+    final raw = ensureMap(response.data);
+    final data = ensureMap(raw['data'] ?? raw);
 
     final goodsTypes = _normalizeList(data['goods_types']);
     final regions = _normalizeList(data['regions']);

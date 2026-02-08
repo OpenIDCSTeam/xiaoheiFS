@@ -68,11 +68,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   Widget _buildContent(BuildContext context, DashboardState data) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return RefreshIndicator(
       onRefresh: () => ref.read(dashboardProvider.notifier).refresh(),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(isMobile ? 16 : 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -159,14 +160,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         }
 
         if (isMobile) {
-          return GridView.count(
-            crossAxisCount: 2,
-            mainAxisSpacing: spacing,
-            crossAxisSpacing: spacing,
+          return GridView.builder(
+            itemCount: cards.length,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 1.6,
-            children: cards.map((item) {
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              mainAxisExtent: 154,
+            ),
+            itemBuilder: (context, index) {
+              final item = cards[index];
               return _buildStatCard(
                 context,
                 item.title,
@@ -176,7 +181,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 route: item.route,
                 isMobile: true,
               );
-            }).toList(),
+            },
           );
         }
 
@@ -223,28 +228,28 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: color.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(icon, color: color, size: 22),
+                      child: Icon(icon, color: color, size: 20),
                     ),
-                    const Spacer(),
+                    const SizedBox(height: 10),
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: AppColors.gray500,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       value,
                       style: const TextStyle(
-                        fontSize: 18,
+                        fontSize: 22,
                         fontWeight: FontWeight.bold,
                       ),
                       maxLines: 1,

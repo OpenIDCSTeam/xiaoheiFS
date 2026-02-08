@@ -44,6 +44,7 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
   bool _showPanelPassword = false;
   String _currentRoute = '';
   int _tabIndex = 0;
+  bool _fabLocked = false;
 
   @override
   void initState() {
@@ -77,9 +78,24 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
   }
 
   void _handleTabChanged() {
-    if (_tabController.indexIsChanging) return;
-    setState(() => _tabIndex = _tabController.index);
-    _refreshSecurityTabIfNeeded(_tabController.index);
+    if (_tabController.indexIsChanging) {
+      if (!_fabLocked) {
+        setState(() => _fabLocked = true);
+      }
+      return;
+    }
+    final nextIndex = _tabController.index;
+    if (_tabIndex == nextIndex) {
+      if (_fabLocked) {
+        setState(() => _fabLocked = false);
+      }
+      return;
+    }
+    setState(() {
+      _tabIndex = nextIndex;
+      _fabLocked = false;
+    });
+    _refreshSecurityTabIfNeeded(nextIndex);
   }
 
   void _refreshSecurityTabIfNeeded(int index) {
@@ -108,18 +124,8 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     final error = ref.watch(vpsDetailProvider.select((s) => s.error));
 
     return Scaffold(
-      floatingActionButton: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 120),
-        switchInCurve: Curves.easeOut,
-        switchOutCurve: Curves.easeIn,
-        transitionBuilder: (child, animation) {
-          return ScaleTransition(
-            scale: animation,
-            child: FadeTransition(opacity: animation, child: child),
-          );
-        },
-        child: _buildFab() ?? const SizedBox.shrink(key: ValueKey('fab-none')),
-      ),
+      floatingActionButtonAnimator: FloatingActionButtonAnimator.noAnimation,
+      floatingActionButton: _buildFab(),
       body: detail == null && loading
           ? const Center(child: CircularProgressIndicator())
           : detail == null && error != null
@@ -132,20 +138,19 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     switch (_tabIndex) {
       case 2:
         return FloatingActionButton(
-          key: const ValueKey('fab-firewall'),
-          onPressed: () => _openFirewallDialog(context),
+          onPressed: _fabLocked ? null : () => _openFirewallDialog(context),
           child: const Icon(Icons.add),
         );
       case 3:
         return FloatingActionButton(
-          key: const ValueKey('fab-port'),
-          onPressed: () => _openPortDialog(context),
+          onPressed: _fabLocked ? null : () => _openPortDialog(context),
           child: const Icon(Icons.add),
         );
       case 4:
         return FloatingActionButton(
-          key: const ValueKey('fab-snapshot'),
-          onPressed: () async {
+          onPressed: _fabLocked
+              ? null
+              : () async {
             await _operate(
               context,
               () => ref.read(vpsRepositoryProvider).createSnapshot(widget.id),
@@ -157,8 +162,9 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
         );
       case 5:
         return FloatingActionButton(
-          key: const ValueKey('fab-backup'),
-          onPressed: () async {
+          onPressed: _fabLocked
+              ? null
+              : () async {
             await _operate(
               context,
               () => ref.read(vpsRepositoryProvider).createBackup(widget.id),
@@ -187,6 +193,15 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
         TabBar(
           controller: _tabController,
           isScrollable: true,
+          tabAlignment: TabAlignment.center,
+          onTap: (index) {
+            if (_tabIndex == index) return;
+            setState(() {
+              _tabIndex = index;
+              _fabLocked = true;
+            });
+            _refreshSecurityTabIfNeeded(index);
+          },
           tabs: const [
             Tab(text: '总览'),
             Tab(text: '实时监控'),
@@ -228,8 +243,8 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     final borderColor = Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5);
 
     final primary = AppColors.primary;
-    final actionTextStyle = const TextStyle(fontWeight: FontWeight.w600);
-    final pillPadding = const EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+    final actionTextStyle = const TextStyle(fontWeight: FontWeight.w600, fontSize: 15);
+    final pillPadding = const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
     final pillShape = const StadiumBorder();
 
     final primaryButtonStyle = ElevatedButton.styleFrom(
@@ -260,7 +275,7 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
         color: surface.withOpacity(0.92),
         borderRadius: BorderRadius.circular(16),
@@ -282,15 +297,15 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
               Expanded(
                 child: Text(
                   '$name',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: onSurface),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: onSurface),
                 ),
               ),
               StatusTag.vps(resolvedStatus),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
+            spacing: 6,
             runSpacing: 6,
             children: [
               _buildMetaChip('ID', '${detail['id'] ?? ''}'),
@@ -300,41 +315,41 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
               _buildMetaChip(spec.bandwidthMbps > 0 ? '${spec.bandwidthMbps}Mbps' : '-', ''),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
-            runSpacing: 8,
+            runSpacing: 6,
             children: [
               ElevatedButton.icon(
                 style: primaryButtonStyle,
                 onPressed: () => _openPanel(),
-                icon: const Icon(Icons.api_outlined),
+                icon: const Icon(Icons.api_outlined, size: 18),
                 label: const Text('控制面板'),
               ),
               if (emergencyRenewEligible)
                 ElevatedButton.icon(
                   style: dangerButtonStyle,
                   onPressed: () => _submitEmergencyRenew(),
-                  icon: const Icon(Icons.sync),
+                  icon: const Icon(Icons.sync, size: 18),
                   label: const Text('紧急续费'),
                 )
               else
                 OutlinedButton.icon(
                   style: outlineButtonStyle,
                   onPressed: () => _openRenewDialog(context),
-                  icon: const Icon(Icons.sync),
+                  icon: const Icon(Icons.sync, size: 18),
                   label: const Text('续费'),
                 ),
               OutlinedButton.icon(
                 style: outlineButtonStyle,
                 onPressed: () => _openRemote(),
-                icon: const Icon(Icons.computer),
+                icon: const Icon(Icons.computer, size: 18),
                 label: const Text('远程'),
               ),
               OutlinedButton.icon(
                 style: outlineButtonStyle,
                 onPressed: loading ? null : _refreshCurrentPage,
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('刷新'),
               ),
             ],
@@ -347,15 +362,15 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
   Widget _buildMetaChip(String label, String value) {
     final text = value.isEmpty ? label : '$label $value';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: AppColors.darkSurface.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(9),
         border: Border.all(color: AppColors.gray600.withOpacity(0.4)),
       ),
       child: Text(
         text,
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -690,7 +705,7 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
           child: LinearProgressIndicator(
             value: value.clamp(0, 100) / 100,
             minHeight: 6,
-            backgroundColor: AppColors.gray200,
+            backgroundColor: AppColors.darkSurface.withOpacity(0.9),
             color: color,
           ),
         ),
@@ -823,6 +838,10 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
             children: [
               Expanded(
                 child: Text(_showOsPassword ? (access.osPassword.isEmpty ? '-' : access.osPassword) : '••••••••'),
+              ),
+              IconButton(
+                onPressed: access.osPassword.isEmpty ? null : () => _copyText(access.osPassword, '系统密码'),
+                icon: const Icon(Icons.copy, size: 16),
               ),
               IconButton(
                 onPressed: () => setState(() => _showOsPassword = !_showOsPassword),
@@ -1644,7 +1663,9 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
                   labelText: '外部端口',
                   hintText: '输入端口后自动匹配',
                 ),
-                onChanged: (value) => scheduleCandidates(value, setModalState),
+                onChanged: (value) {
+                  scheduleCandidates(value, setModalState);
+                },
               ),
               if (_portCandidatesLoading)
                 const Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()),
@@ -1658,11 +1679,14 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
                     Wrap(
                       spacing: 8,
                       runSpacing: 6,
-                      children: _portCandidates.map((value) {
+                      children: _portCandidates.take(8).map((value) {
                         return ActionChip(
                           label: Text('$value'),
                           onPressed: () {
-                            sportController.text = '$value';
+                            setModalState(() {
+                              sportController.text = '$value';
+                              _portCandidates = [];
+                            });
                           },
                         );
                       }).toList(),
@@ -2201,9 +2225,21 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
 
     if (platform.isMobile) {
       if (isWindows) {
-        final candidates = <String>[
-          _buildRdpLink(remote.host, remote.port, username, password),
+        final opened = await _launchUrl(
           _buildMsRdLink(remote.host, remote.port, username),
+          silent: true,
+        );
+        if (!opened && mounted) {
+          final tip = '远程地址: ${remote.host}:${remote.port}\n用户: $username\n密码: $password';
+          await Clipboard.setData(ClipboardData(text: tip));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('ms-rd 唤起失败，已复制连接信息，请检查 Windows App 的默认链接权限'),
+          ));
+        }
+      } else {
+        final candidates = <String>[
+          _buildSshLink(remote.host, remote.port, username),
+          _buildTermiusLink(remote.host, remote.port, username),
         ];
         var opened = false;
         for (final candidate in candidates) {
@@ -2211,16 +2247,11 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
           if (opened) break;
         }
         if (!opened && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未检测到可用远程桌面应用，请先安装微软远程桌面')),
-          );
-        }
-      } else {
-        final opened = await _launchUrl(_buildSshLink(remote.host, remote.port, username), silent: true);
-        if (!opened && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未检测到可用 SSH 客户端，请先安装 Termius/ConnectBot')),
-          );
+          final tip = 'ssh $username@${remote.host} -p ${remote.port}';
+          await Clipboard.setData(ClipboardData(text: tip));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('未检测到可用 SSH 客户端，已复制 SSH 命令，请安装 Termius/ConnectBot'),
+          ));
         }
       }
       return;
@@ -2294,6 +2325,19 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     return 'rdp:$encodedRemote&$encodedUser&$encodedPass';
   }
 
+  String _buildRdpLegacyLink(String host, String port, String username, String password) {
+    final remote = Uri.encodeComponent('$host:$port');
+    final user = Uri.encodeComponent(username);
+    final pass = Uri.encodeComponent(password);
+    return 'rdp:full%20address=s:$remote&username=s:$user&password=s:$pass';
+  }
+
+  String _buildRdpNoPasswordLink(String host, String port, String username) {
+    final remote = Uri.encodeComponent('$host:$port');
+    final user = Uri.encodeComponent(username);
+    return 'rdp:full%20address=s:$remote&username=s:$user';
+  }
+
   String _buildSshLink(String host, String port, String username) {
     return 'ssh://$username@$host:$port';
   }
@@ -2301,6 +2345,15 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
   String _buildMsRdLink(String host, String port, String username) {
     final encoded = Uri.encodeComponent('$host:$port');
     return 'ms-rd://connect?hostname=$encoded&username=$username';
+  }
+
+  String _buildMsRdcLink(String host, String port, String username) {
+    final encoded = Uri.encodeComponent('$host:$port');
+    return 'ms-rdc://connect?hostname=$encoded&username=$username';
+  }
+
+  String _buildTermiusLink(String host, String port, String username) {
+    return 'termius://ssh?host=$host&port=$port&username=$username';
   }
 
   void _downloadRdpFile(String host, String port, String username) {
@@ -2329,17 +2382,31 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
   Future<bool> _launchUrl(String url, {bool silent = false}) async {
     final uri = Uri.parse(url);
     try {
-      final mode = getPlatformUtils().isMobile
-          ? LaunchMode.externalNonBrowserApplication
-          : LaunchMode.platformDefault;
-      final opened = await launchUrl(uri, mode: mode);
-      if (!opened && !silent && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开链接')));
+      final platform = getPlatformUtils();
+      final modes = platform.isMobile
+          ? const [
+              LaunchMode.externalNonBrowserApplication,
+              LaunchMode.externalApplication,
+              LaunchMode.platformDefault,
+            ]
+          : const [LaunchMode.platformDefault];
+
+      for (final mode in modes) {
+        try {
+          final opened = await launchUrl(uri, mode: mode);
+          if (opened) return true;
+        } catch (_) {
+          // Try next mode.
+        }
       }
-      return opened;
+
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开连接')));
+      }
+      return false;
     } catch (_) {
       if (!silent && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开链接')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开连接')));
       }
       return false;
     }

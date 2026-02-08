@@ -34,13 +34,31 @@ class _BuyVpsPageState extends ConsumerState<BuyVpsPage> {
   bool _loadingImages = false;
   int? _loadedPlanGroupId;
   ProviderSubscription<CatalogState>? _catalogSub;
+  DateTime? _catalogLoadingSince;
+  DateTime? _lastCatalogForceFetchAt;
+
+  bool _isCatalogEmpty(CatalogState s) {
+    return s.goodsTypes.isEmpty &&
+        s.regions.isEmpty &&
+        s.planGroups.isEmpty &&
+        s.packages.isEmpty &&
+        s.billingCycles.isEmpty;
+  }
 
   @override
   void initState() {
     super.initState();
-    ref.read(catalogProvider.notifier).fetchCatalog();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(catalogProvider.notifier).fetchCatalog(force: true);
+    });
     _catalogSub = ref.listenManual<CatalogState>(catalogProvider, (prev, next) {
       if (!mounted) return;
+      if (next.loading && !(prev?.loading ?? false)) {
+        _catalogLoadingSince = DateTime.now();
+      } else if (!next.loading) {
+        _catalogLoadingSince = null;
+      }
       _syncDefaults(next);
     });
   }
@@ -54,16 +72,15 @@ class _BuyVpsPageState extends ConsumerState<BuyVpsPage> {
   @override
   Widget build(BuildContext context) {
     final catalog = ref.watch(catalogProvider);
+    _ensureCatalogFetch(catalog);
 
-    if (catalog.loading && catalog.goodsTypes.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (catalog.error != null) {
+    // Align with frontend BuyVps.vue:
+    // no full-page loading gate; render page as soon as any catalog data exists.
+    if (catalog.error != null && _isCatalogEmpty(catalog)) {
       return EmptyState(
         message: '加载购买配置失败',
         actionLabel: '重试',
-        onAction: () => ref.read(catalogProvider.notifier).fetchCatalog(),
+        onAction: () => ref.read(catalogProvider.notifier).fetchCatalog(force: true),
       );
     }
 
@@ -284,6 +301,33 @@ class _BuyVpsPageState extends ConsumerState<BuyVpsPage> {
         ],
       ),
     );
+  }
+
+  void _ensureCatalogFetch(CatalogState catalog) {
+    final now = DateTime.now();
+    final empty = _isCatalogEmpty(catalog);
+    final lastKick = _lastCatalogForceFetchAt;
+    final canKick = lastKick == null || now.difference(lastKick).inSeconds >= 3;
+
+    if (empty && !catalog.loading && canKick) {
+      _lastCatalogForceFetchAt = now;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(catalogProvider.notifier).fetchCatalog(force: true);
+      });
+      return;
+    }
+
+    if (empty && catalog.loading && canKick && _catalogLoadingSince != null) {
+      final loadingSeconds = now.difference(_catalogLoadingSince!).inSeconds;
+      if (loadingSeconds >= 12) {
+        _lastCatalogForceFetchAt = now;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ref.read(catalogProvider.notifier).fetchCatalog(force: true);
+        });
+      }
+    }
   }
 
   Widget _buildHeader({bool isLoading = false}) {
@@ -689,17 +733,25 @@ class _BuyVpsPageState extends ConsumerState<BuyVpsPage> {
   }
 
   Widget _summaryRow(String label, dynamic value) {
+    final textValue = value?.toString().isNotEmpty == true ? value.toString() : '-';
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Text(label, style: const TextStyle(color: AppColors.gray400)),
-          const Spacer(),
-          Flexible(
+          Expanded(
             child: Text(
-              value?.toString().isNotEmpty == true ? value.toString() : '-',
-              style: const TextStyle(fontWeight: FontWeight.w500),
+              label,
+              style: const TextStyle(color: AppColors.gray400),
+            ),
+          ),
+          SizedBox(
+            width: 132,
+            child: Text(
+              textValue,
+              style: const TextStyle(fontWeight: FontWeight.w600),
               textAlign: TextAlign.right,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

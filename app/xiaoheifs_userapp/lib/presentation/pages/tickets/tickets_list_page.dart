@@ -53,8 +53,16 @@ class _TicketsListPageState extends ConsumerState<TicketsListPage> {
   @override
   Widget build(BuildContext context) {
     final ticketListState = ref.watch(ticketListProvider);
+    final isMobileLike = MediaQuery.of(context).size.width <= 1024;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && isMobileLike) {
+          context.go('/console/more');
+        }
+      },
+      child: Scaffold(
       body: ticketListState.loading
           ? const Center(child: CircularProgressIndicator())
           : ticketListState.items.isEmpty
@@ -71,7 +79,8 @@ class _TicketsListPageState extends ConsumerState<TicketsListPage> {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButtonAnimator: FloatingActionButtonAnimator.scaling,
+        floatingActionButtonAnimator: FloatingActionButtonAnimator.scaling,
+      ),
     );
   }
 
@@ -316,3 +325,4 @@ class _MultiSelectChipsState extends State<_MultiSelectChips> {
     );
   }
 }
+

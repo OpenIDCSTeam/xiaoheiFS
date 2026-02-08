@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../providers/realname_provider.dart';
@@ -13,13 +14,22 @@ class RealnamePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final realnameState = ref.watch(realnameProvider);
+    final isMobileLike = MediaQuery.of(context).size.width <= 1024;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && isMobileLike) {
+          context.go('/console/more');
+        }
+      },
+      child: Scaffold(
       body: realnameState.loading
           ? const Center(child: CircularProgressIndicator())
           : realnameState.error != null
               ? Center(child: Text('错误: ${realnameState.error}'))
               : _buildContent(context, ref, realnameState.data ?? {}),
+      ),
     );
   }
 
@@ -246,3 +256,4 @@ class RealnamePage extends ConsumerWidget {
     return value.replaceRange(start, end, '*' * (end - start));
   }
 }
+

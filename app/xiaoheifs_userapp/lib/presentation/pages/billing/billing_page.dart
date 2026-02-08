@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/money_formatter.dart';
@@ -12,8 +13,16 @@ class BillingPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final walletState = ref.watch(walletProvider);
+    final isMobileLike = MediaQuery.of(context).size.width <= 1024;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && isMobileLike) {
+          context.go('/console/more');
+        }
+      },
+      child: Scaffold(
       body: walletState.loading
           ? const Center(child: CircularProgressIndicator())
           : walletState.error != null
@@ -42,6 +51,7 @@ class BillingPage extends ConsumerWidget {
                 ),
               ),
             ),
+      ),
     );
   }
 
@@ -319,3 +329,4 @@ class BillingPage extends ConsumerWidget {
     }
   }
 }
+
