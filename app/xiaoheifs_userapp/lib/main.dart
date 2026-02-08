@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/navigation/app_navigator.dart';
 import 'core/network/api_client.dart';
@@ -8,10 +9,8 @@ import 'presentation/routes/app_routes.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 初始化存储服务
   await StorageService.init();
 
-  // 初始化 API 客户端
   final client = ApiClient.instance;
   final savedBaseUrl = StorageService.instance.getApiBaseUrl();
   if (savedBaseUrl != null && savedBaseUrl.isNotEmpty) {
@@ -38,9 +37,26 @@ class MyApp extends ConsumerWidget {
       scaffoldMessengerKey: AppNavigator.messengerKey,
       builder: (context, child) {
         final media = MediaQuery.of(context);
-        return MediaQuery(
+        final appChild = MediaQuery(
           data: media.copyWith(textScaler: const TextScaler.linear(1.0)),
           child: child ?? const SizedBox.shrink(),
+        );
+
+        if (defaultTargetPlatform != TargetPlatform.android) {
+          return appChild;
+        }
+
+        return Align(
+          alignment: Alignment.topCenter,
+          child: Transform.scale(
+            scale: 0.75,
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              width: media.size.width / 0.75,
+              height: media.size.height / 0.75,
+              child: appChild,
+            ),
+          ),
         );
       },
       theme: ThemeData(
@@ -66,9 +82,3 @@ class MyApp extends ConsumerWidget {
     );
   }
 }
-
-
-
-
-
-

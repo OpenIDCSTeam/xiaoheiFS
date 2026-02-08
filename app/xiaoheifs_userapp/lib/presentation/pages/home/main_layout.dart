@@ -202,6 +202,9 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
     if (location.startsWith('/console/tickets/')) return '/console/tickets';
     if (location.startsWith('/console/notifications')) return '/console/more';
     if (location.startsWith('/console/buy')) return '/console/vps';
+    if (location.startsWith('/console/billing')) return '/console/more';
+    if (location.startsWith('/console/realname')) return '/console/more';
+    if (location.startsWith('/console/profile')) return '/console/more';
     return null;
   }
 

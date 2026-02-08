@@ -2200,10 +2200,29 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     final platform = getPlatformUtils();
 
     if (platform.isMobile) {
-      final url = isWindows
-          ? _buildRdpLink(remote.host, remote.port, username, password)
-          : _buildSshLink(remote.host, remote.port, username);
-      await _launchUrl(url);
+      if (isWindows) {
+        final candidates = <String>[
+          _buildRdpLink(remote.host, remote.port, username, password),
+          _buildMsRdLink(remote.host, remote.port, username),
+        ];
+        var opened = false;
+        for (final candidate in candidates) {
+          opened = await _launchUrl(candidate, silent: true);
+          if (opened) break;
+        }
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未检测到可用远程桌面应用，请先安装微软远程桌面')),
+          );
+        }
+      } else {
+        final opened = await _launchUrl(_buildSshLink(remote.host, remote.port, username), silent: true);
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未检测到可用 SSH 客户端，请先安装 Termius/ConnectBot')),
+          );
+        }
+      }
       return;
     }
 
@@ -2279,6 +2298,11 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     return 'ssh://$username@$host:$port';
   }
 
+  String _buildMsRdLink(String host, String port, String username) {
+    final encoded = Uri.encodeComponent('$host:$port');
+    return 'ms-rd://connect?hostname=$encoded&username=$username';
+  }
+
   void _downloadRdpFile(String host, String port, String username) {
     final content = [
       'full address:s:$host:$port',
@@ -2302,12 +2326,22 @@ class _VpsDetailPageState extends ConsumerState<VpsDetailPage>
     downloadTextFile(filename, content, mimeType);
   }
 
-  Future<void> _launchUrl(String url) async {
+  Future<bool> _launchUrl(String url, {bool silent = false}) async {
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.platformDefault);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开链接')));
+    try {
+      final mode = getPlatformUtils().isMobile
+          ? LaunchMode.externalNonBrowserApplication
+          : LaunchMode.platformDefault;
+      final opened = await launchUrl(uri, mode: mode);
+      if (!opened && !silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开链接')));
+      }
+      return opened;
+    } catch (_) {
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法打开链接')));
+      }
+      return false;
     }
   }
 
