@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+ï»¿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/api_config.dart';
 import '../../../core/constants/app_colors.dart';
@@ -9,7 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../widgets/common/app_button.dart';
 import '../../widgets/common/app_input.dart';
 
-/// µÇÂ¼Ò³Ãæ
+/// ç™»å½•é¡µé¢
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -169,7 +169,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '¸ß¼¶ÉèÖÃ',
+                            'é«˜çº§è®¾ç½®',
                             style: TextStyle(
                               fontSize: 14,
                               color: AppColors.gray400,
@@ -278,7 +278,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         ),
         const SizedBox(height: 8),
         Text(
-          'ÇëµÇÂ¼ÄúµÄÕË»§',
+          'è¯·ç™»å½•æ‚¨çš„è´¦æˆ·',
           style: TextStyle(
             fontSize: 14,
             color: AppColors.gray400,
@@ -288,4 +288,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     );
   }
 }
+
+
 

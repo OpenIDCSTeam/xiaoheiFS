@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+Ôªøimport 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_strings.dart';
@@ -6,7 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../widgets/common/app_button.dart';
 import '../../widgets/common/app_input.dart';
 
-/// ∏ˆ»À…Ë÷√“≥√Ê
+/// ‰∏™‰∫∫ËÆæÁΩÆÈ°µÈù¢
 class ProfilePage extends ConsumerWidget {
   const ProfilePage({super.key});
 
@@ -16,8 +16,21 @@ class ProfilePage extends ConsumerWidget {
     final user = authState.user;
 
     if (user == null) {
-      return const Center(child: Text('«Îœ»µ«¬º'));
+      return const Center(child: Text('ËØ∑ÂÖàÁôªÂΩï'));
     }
+
+    final emailController = TextEditingController(
+      text: _sanitizeProfileValue(user.email?.toString()),
+    );
+    final phoneController = TextEditingController(
+      text: _sanitizeProfileValue(user.phone?.toString()),
+    );
+    final qqController = TextEditingController(
+      text: _sanitizeProfileValue(user.qq?.toString()),
+    );
+    final bioController = TextEditingController(
+      text: _sanitizeProfileValue(user.bio?.toString()),
+    );
 
     return Scaffold(
       body: SingleChildScrollView(
@@ -30,16 +43,35 @@ class ProfilePage extends ConsumerWidget {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
-            // ”√ªß–≈œ¢ø®∆¨
             _buildUserInfoCard(user),
             const SizedBox(height: 24),
-
-            // ±‡º≠±Ìµ•
-            _buildEditForm(context, ref, user),
+            _buildEditForm(
+              context,
+              ref,
+              emailController,
+              phoneController,
+              qqController,
+              bioController,
+            ),
           ],
         ),
       ),
     );
+  }
+
+  static String _sanitizeProfileValue(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return '';
+
+    if (value.contains('ÔøΩ')) return '';
+    if (RegExp(r'[\u0080-\u009f]').hasMatch(value)) return '';
+
+    final lowered = value.toLowerCase();
+    if (lowered.contains('Èçô') || lowered.contains('Èñ´‚Ç¨') || lowered.contains('ÈèÜ')) {
+      return '';
+    }
+
+    return value;
   }
 
   Widget _buildUserInfoCard(dynamic user) {
@@ -93,12 +125,14 @@ class ProfilePage extends ConsumerWidget {
     );
   }
 
-  Widget _buildEditForm(BuildContext context, WidgetRef ref, dynamic user) {
-    final emailController = TextEditingController(text: user.email ?? '');
-    final phoneController = TextEditingController(text: user.phone ?? '');
-    final qqController = TextEditingController(text: user.qq ?? '');
-    final bioController = TextEditingController(text: user.bio ?? '');
-
+  Widget _buildEditForm(
+    BuildContext context,
+    WidgetRef ref,
+    TextEditingController emailController,
+    TextEditingController phoneController,
+    TextEditingController qqController,
+    TextEditingController bioController,
+  ) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -107,63 +141,55 @@ class ProfilePage extends ConsumerWidget {
           children: [
             AppInput(
               label: AppStrings.email,
-              hint: '«Î ‰»Î” œ‰',
+              hint: 'ËØ∑ËæìÂÖ•ÈÇÆÁÆ±',
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
               prefixIcon: const Icon(Icons.email_outlined),
             ),
-
             const SizedBox(height: 16),
-
             AppInput(
               label: AppStrings.phone,
-              hint: '«Î ‰»Î ÷ª˙∫≈',
+              hint: 'ËØ∑ËæìÂÖ•ÊâãÊú∫Âè∑',
               controller: phoneController,
               keyboardType: TextInputType.phone,
               prefixIcon: const Icon(Icons.phone_outlined),
             ),
-
             const SizedBox(height: 16),
-
             AppInput(
               label: AppStrings.qq,
-              hint: '«Î ‰»ÎQQ∫≈',
+              hint: 'ËØ∑ËæìÂÖ•QQÂè∑',
               controller: qqController,
               keyboardType: TextInputType.number,
               prefixIcon: const Icon(Icons.chat_bubble_outline),
             ),
-
             const SizedBox(height: 16),
-
             AppInput(
               label: AppStrings.bio,
-              hint: '«Î ‰»Î∏ˆ»ÀºÚΩÈ',
+              hint: 'ËØ∑ËæìÂÖ•‰∏™‰∫∫ÁÆÄ‰ªã',
               controller: bioController,
               maxLines: 3,
               prefixIcon: const Icon(Icons.edit_note),
             ),
-
             const SizedBox(height: 24),
-
             AppButton(
               text: AppStrings.save,
               onPressed: () async {
                 try {
                   await ref.read(authProvider.notifier).updateUserInfo({
-                    'email': emailController.text,
-                    'phone': phoneController.text,
-                    'qq': qqController.text,
-                    'bio': bioController.text,
+                    'email': emailController.text.trim(),
+                    'phone': phoneController.text.trim(),
+                    'qq': qqController.text.trim(),
+                    'bio': bioController.text.trim(),
                   });
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('±£¥Ê≥…π¶')),
+                      const SnackBar(content: Text('‰øùÂ≠òÊàêÂäü')),
                     );
                   }
                 } catch (e) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('±£¥Ê ß∞‹: $e')),
+                      SnackBar(content: Text('‰øùÂ≠òÂ§±Ë¥•: $e')),
                     );
                   }
                 }
@@ -175,5 +201,3 @@ class ProfilePage extends ConsumerWidget {
     );
   }
 }
-
-

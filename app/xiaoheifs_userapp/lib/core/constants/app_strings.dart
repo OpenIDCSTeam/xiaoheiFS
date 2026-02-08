@@ -172,3 +172,4 @@ class AppStrings {
   static const String requestTimeout = '请求超时';
   static const String unknownError = '未知错误';
 }
+

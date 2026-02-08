@@ -1,4 +1,4 @@
-import 'dart:ui';
+﻿import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,8 +10,8 @@ import '../../providers/notification_provider.dart';
 import '../../providers/refresh_provider.dart';
 import '../../providers/site_provider.dart';
 
-/// 涓诲竷灞€
-/// 鍖呭惈渚ц竟鏍?椤堕儴鏍?搴曢儴瀵艰埅
+/// 主布局组件
+/// 包含顶部栏、侧边/底部导航和用户菜单
 class MainLayout extends ConsumerStatefulWidget {
   final Widget child;
 
@@ -502,7 +502,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
   }
 }
 
-/// 瀵艰埅椤归厤缃被
+/// 导航项
 class NavigationItem {
   final IconData icon;
   final IconData selectedIcon;
@@ -516,6 +516,7 @@ class NavigationItem {
     required this.route,
   });
 }
+
 
 
 
