@@ -4,8 +4,8 @@ class AppStrings {
   AppStrings._();
 
   // 应用信息
-  static const String appName = '小黑云服务';
-  static const String appTitle = 'XiaoHei Cloud';
+  static const String appName = '云享互联';
+  static const String appTitle = '云享互联';
 
   // 通用
   static const String loading = '加载中...';
