@@ -16,6 +16,16 @@ class BillingPage extends ConsumerWidget {
     return Scaffold(
       body: walletState.loading
           ? const Center(child: CircularProgressIndicator())
+          : walletState.error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      '加载钱包失败：${walletState.error}',
+                      style: const TextStyle(color: AppColors.danger),
+                    ),
+                  ),
+                )
           : RefreshIndicator(
               onRefresh: () => ref.read(walletProvider.notifier).refresh(),
               child: SingleChildScrollView(
@@ -39,7 +49,7 @@ class BillingPage extends ConsumerWidget {
     final rawWallet = wallet?['wallet'];
     final data =
         rawWallet is Map ? rawWallet.cast<String, dynamic>() : wallet;
-    final balance = data?['balance'] ?? 0;
+    final balance = double.tryParse('${data?['balance'] ?? 0}') ?? 0;
     final currency = data?['currency'] ?? 'CNY';
     return Card(
       child: Container(
@@ -137,7 +147,7 @@ class BillingPage extends ConsumerWidget {
                   title: Text(typeLabel),
                   subtitle: Text('$createdAt'),
                   trailing: Text(
-                    MoneyFormatter.format(amount),
+                    MoneyFormatter.format(amountValue),
                     style: TextStyle(
                       color: amountColor,
                       fontWeight: FontWeight.bold,

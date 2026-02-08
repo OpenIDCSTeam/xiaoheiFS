@@ -56,6 +56,16 @@ class _OrdersListPageState extends ConsumerState<OrdersListPage> {
     return Scaffold(
       body: orderListState.loading
           ? const Center(child: CircularProgressIndicator())
+          : orderListState.error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      '加载订单失败：${orderListState.error}',
+                      style: const TextStyle(color: AppColors.danger),
+                    ),
+                  ),
+                )
           : orderListState.items.isEmpty
               ? const EmptyState(
                   message: AppStrings.noOrders,
@@ -113,7 +123,7 @@ class _OrdersListPageState extends ConsumerState<OrdersListPage> {
                       children: [
                         const SizedBox(height: 8),
                         Text(
-                          MoneyFormatter.format(totalAmount),
+                          MoneyFormatter.format(totalValue),
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,

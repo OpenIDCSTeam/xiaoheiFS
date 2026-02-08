@@ -159,7 +159,7 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
       final selectedIndex = _desktopIndexForLocation(location);
       return _wrapBackHandler(
         isDesktop: true,
-        selectedIndex: selectedIndex,
+        location: location,
         child: _buildDesktopLayout(user, selectedIndex, unreadCount, location, siteName),
       );
     }
@@ -167,31 +167,42 @@ class _MainLayoutState extends ConsumerState<MainLayout> {
     final selectedIndex = _mobileIndexForLocation(location);
     return _wrapBackHandler(
       isDesktop: false,
-      selectedIndex: selectedIndex,
+      location: location,
       child: _buildMobileLayout(user, selectedIndex, unreadCount, location, siteName),
     );
   }
 
   Widget _wrapBackHandler({
     required bool isDesktop,
-    required int selectedIndex,
+    required String location,
     required Widget child,
   }) {
     return WillPopScope(
       onWillPop: () async {
-        final canPop = Navigator.of(context).canPop();
-        if (canPop) {
-          Navigator.of(context).pop();
+        if (Navigator.of(context).canPop()) {
+          return true;
+        }
+
+        final backRoute = _resolveBackRoute(location);
+        if (backRoute != null && backRoute != location) {
+          context.go(backRoute);
           return false;
         }
-        if (!isDesktop && selectedIndex != 0) {
-          _onDestinationSelected(0, _mobilePrimaryItems);
-          return false;
-        }
-        return true;
+
+        // Already at root page: allow system pop/exit.
+        return !isDesktop;
       },
       child: child,
     );
+  }
+
+  String? _resolveBackRoute(String location) {
+    if (location.startsWith('/console/vps/')) return '/console/vps';
+    if (location.startsWith('/console/orders/')) return '/console/orders';
+    if (location.startsWith('/console/tickets/')) return '/console/tickets';
+    if (location.startsWith('/console/notifications')) return '/console/more';
+    if (location.startsWith('/console/buy')) return '/console/vps';
+    return null;
   }
 
   int _desktopIndexForLocation(String location) {

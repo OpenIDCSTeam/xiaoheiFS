@@ -48,6 +48,8 @@ class MyApp extends ConsumerWidget {
           seedColor: Colors.blue,
           brightness: Brightness.light,
         ),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
@@ -55,6 +57,8 @@ class MyApp extends ConsumerWidget {
           seedColor: Colors.blue,
           brightness: Brightness.dark,
         ),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         useMaterial3: true,
       ),
       themeMode: ThemeMode.system,

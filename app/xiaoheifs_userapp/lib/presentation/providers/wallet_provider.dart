@@ -66,17 +66,25 @@ class WalletNotifier extends StateNotifier<WalletState> {
   }
 
   Future<void> loadOrders({int limit = 100, int offset = 0}) async {
-    final res = await _repo.listWalletOrders(limit: limit, offset: offset);
-    final items = res['items'];
-    final list = items is List ? items.map((e) => ensureMap(e)).toList() : <Map<String, dynamic>>[];
-    state = state.copyWith(orders: list);
+    try {
+      final res = await _repo.listWalletOrders(limit: limit, offset: offset);
+      final items = res['items'];
+      final list = items is List ? items.map((e) => ensureMap(e)).toList() : <Map<String, dynamic>>[];
+      state = state.copyWith(orders: list);
+    } catch (e) {
+      state = state.copyWith(error: e.toString(), orders: const []);
+    }
   }
 
   Future<void> loadTransactions({int limit = 100, int offset = 0}) async {
-    final res = await _repo.listWalletTransactions(limit: limit, offset: offset);
-    final items = res['items'];
-    final list = items is List ? items.map((e) => ensureMap(e)).toList() : <Map<String, dynamic>>[];
-    state = state.copyWith(transactions: list);
+    try {
+      final res = await _repo.listWalletTransactions(limit: limit, offset: offset);
+      final items = res['items'];
+      final list = items is List ? items.map((e) => ensureMap(e)).toList() : <Map<String, dynamic>>[];
+      state = state.copyWith(transactions: list);
+    } catch (e) {
+      state = state.copyWith(error: e.toString(), transactions: const []);
+    }
   }
 
   Future<void> recharge(Map<String, dynamic> payload) async {
