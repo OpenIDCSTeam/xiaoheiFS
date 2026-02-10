@@ -25,7 +25,7 @@ type Conn struct {
 func Open(cfg config.Config) (*Conn, error) {
 	dbType := strings.ToLower(strings.TrimSpace(cfg.DBType))
 	if dbType == "" {
-		dbType = "sqlite"
+		return nil, errors.New("missing APP_DB_TYPE")
 	}
 
 	var gdb *gorm.DB

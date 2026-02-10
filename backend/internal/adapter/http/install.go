@@ -87,7 +87,8 @@ func (h *Handler) InstallDBCheck(c *gin.Context) {
 		DBDSN:  strings.TrimSpace(payload.DB.DSN),
 	}
 	if cfg.DBType == "sqlite" && cfg.DBPath == "" {
-		cfg.DBPath = "./data/app.db"
+		c.JSON(http.StatusBadRequest, gin.H{"error": "db.path required for sqlite"})
+		return
 	}
 	if cfg.DBType == "mysql" && cfg.DBDSN == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "db.dsn required for mysql"})
@@ -173,7 +174,8 @@ func (h *Handler) InstallRun(c *gin.Context) {
 		DBDSN:  strings.TrimSpace(payload.DB.DSN),
 	}
 	if cfg.DBType == "sqlite" && cfg.DBPath == "" {
-		cfg.DBPath = "./data/app.db"
+		c.JSON(http.StatusBadRequest, gin.H{"error": "db.path required for sqlite"})
+		return
 	}
 	if cfg.DBType == "mysql" && cfg.DBDSN == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "db.dsn required for mysql"})
@@ -304,6 +306,13 @@ func (h *Handler) InstallRun(c *gin.Context) {
 		"restart_required": cfg.DBType != "sqlite",
 		"config_file":      configPath,
 	})
+	if cfg.DBType != "sqlite" && gin.Mode() != gin.TestMode {
+		// Trigger process recycle so the newly persisted DB config is applied immediately.
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			os.Exit(0)
+		}()
+	}
 }
 
 func isDuplicateEntryError(err error) bool {

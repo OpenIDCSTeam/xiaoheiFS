@@ -49,12 +49,21 @@ const router = useRouter();
 const route = useRoute();
 
 const onSubmit = async () => {
-  const token = await admin.login(form);
-  if (!token) {
-    message.error("登录失败");
-    return;
+  try {
+    const token = await admin.login(form);
+    if (!token) {
+      message.error("登录失败");
+      return;
+    }
+    router.replace(String(route.query.redirect || "/admin/console"));
+  } catch (error) {
+    const msg =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      "登录失败";
+    message.error(msg);
   }
-  router.replace(String(route.query.redirect || "/admin/console"));
 };
 </script>
 

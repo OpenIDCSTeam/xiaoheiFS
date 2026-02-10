@@ -21,6 +21,8 @@ export const useAdminAuthStore = defineStore("adminAuth", {
           localStorage.setItem(STORAGE_KEY, token);
         }
         return token;
+      } catch {
+        return "";
       } finally {
         this.loading = false;
       }

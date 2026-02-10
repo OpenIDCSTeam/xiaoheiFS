@@ -1814,8 +1814,16 @@ func (r *SQLiteRepo) ListPermissionGroups(ctx context.Context) ([]domain.Permiss
 	var out []domain.PermissionGroup
 	for rows.Next() {
 		var pg domain.PermissionGroup
-		if err := rows.Scan(&pg.ID, &pg.Name, &pg.Description, &pg.PermissionsJSON, &pg.CreatedAt, &pg.UpdatedAt); err != nil {
+		var createdAt sql.NullTime
+		var updatedAt sql.NullTime
+		if err := rows.Scan(&pg.ID, &pg.Name, &pg.Description, &pg.PermissionsJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
+		}
+		if createdAt.Valid {
+			pg.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			pg.UpdatedAt = updatedAt.Time
 		}
 		out = append(out, pg)
 	}
@@ -1825,14 +1833,22 @@ func (r *SQLiteRepo) ListPermissionGroups(ctx context.Context) ([]domain.Permiss
 func (r *SQLiteRepo) GetPermissionGroup(ctx context.Context, id int64) (domain.PermissionGroup, error) {
 	row := r.db.QueryRowContext(ctx, `SELECT id, name, description, permissions_json, created_at, updated_at FROM permission_groups WHERE id = ?`, id)
 	var pg domain.PermissionGroup
-	if err := row.Scan(&pg.ID, &pg.Name, &pg.Description, &pg.PermissionsJSON, &pg.CreatedAt, &pg.UpdatedAt); err != nil {
+	var createdAt sql.NullTime
+	var updatedAt sql.NullTime
+	if err := row.Scan(&pg.ID, &pg.Name, &pg.Description, &pg.PermissionsJSON, &createdAt, &updatedAt); err != nil {
 		return domain.PermissionGroup{}, r.ensure(err)
+	}
+	if createdAt.Valid {
+		pg.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		pg.UpdatedAt = updatedAt.Time
 	}
 	return pg, nil
 }
 
 func (r *SQLiteRepo) CreatePermissionGroup(ctx context.Context, group *domain.PermissionGroup) error {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?)`, group.Name, group.Description, group.PermissionsJSON)
+	res, err := r.db.ExecContext(ctx, `INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, group.Name, group.Description, group.PermissionsJSON)
 	if err != nil {
 		return err
 	}
@@ -2835,7 +2851,7 @@ func (r *SQLiteRepo) HasWalletTransaction(ctx context.Context, userID int64, ref
 }
 
 func (r *SQLiteRepo) CreateWalletOrder(ctx context.Context, order *domain.WalletOrder) error {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO wallet_orders(user_id,type,amount,currency,status,note,meta_json) VALUES (?,?,?,?,?,?,?)`, order.UserID, order.Type, order.Amount, order.Currency, order.Status, order.Note, order.MetaJSON)
+	res, err := r.db.ExecContext(ctx, `INSERT INTO wallet_orders(user_id,type,amount,currency,status,note,meta_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, order.UserID, order.Type, order.Amount, order.Currency, order.Status, order.Note, order.MetaJSON)
 	if err != nil {
 		return err
 	}
@@ -2948,7 +2964,9 @@ func scanWalletOrder(row scanner) (domain.WalletOrder, error) {
 	var order domain.WalletOrder
 	var reviewed sql.NullInt64
 	var reason sql.NullString
-	if err := row.Scan(&order.ID, &order.UserID, &order.Type, &order.Amount, &order.Currency, &order.Status, &order.Note, &order.MetaJSON, &reviewed, &reason, &order.CreatedAt, &order.UpdatedAt); err != nil {
+	var createdAt sql.NullTime
+	var updatedAt sql.NullTime
+	if err := row.Scan(&order.ID, &order.UserID, &order.Type, &order.Amount, &order.Currency, &order.Status, &order.Note, &order.MetaJSON, &reviewed, &reason, &createdAt, &updatedAt); err != nil {
 		return domain.WalletOrder{}, rEnsure(err)
 	}
 	if reviewed.Valid {
@@ -2956,6 +2974,12 @@ func scanWalletOrder(row scanner) (domain.WalletOrder, error) {
 	}
 	if reason.Valid {
 		order.ReviewReason = reason.String
+	}
+	if createdAt.Valid {
+		order.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		order.UpdatedAt = updatedAt.Time
 	}
 	return order, nil
 }

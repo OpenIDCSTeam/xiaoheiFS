@@ -57,8 +57,8 @@ type fileConfig struct {
 func Load() Config {
 	cfg := Config{
 		Addr:               ":8080",
-		DBType:             "sqlite",
-		DBPath:             "./data/app.db",
+		DBType:             "",
+		DBPath:             "",
 		DBDSN:              "",
 		AdminUser:          "admin",
 		AdminPass:          "admin123",

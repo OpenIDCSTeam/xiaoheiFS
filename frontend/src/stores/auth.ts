@@ -21,6 +21,8 @@ export const useAuthStore = defineStore("auth", {
           localStorage.setItem(STORAGE_KEY, token);
         }
         return token;
+      } catch {
+        return "";
       } finally {
         this.loading = false;
       }

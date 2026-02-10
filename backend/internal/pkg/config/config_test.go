@@ -9,8 +9,11 @@ import (
 
 func TestLoadConfigDefaults(t *testing.T) {
 	cfg := Load()
-	if cfg.Addr == "" || cfg.DBPath == "" {
+	if cfg.Addr == "" {
 		t.Fatalf("expected defaults")
+	}
+	if strings.TrimSpace(cfg.DBType) != "" || strings.TrimSpace(cfg.DBPath) != "" {
+		t.Fatalf("expected db defaults to be empty, got type=%q path=%q", cfg.DBType, cfg.DBPath)
 	}
 }
 
