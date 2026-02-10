@@ -125,6 +125,9 @@ func readLocalConfig() (*fileConfig, string) {
 		filepath.Join("backend", localConfigJSON),
 	}
 
+	var fallbackFC *fileConfig
+	var fallbackPath string
+
 	for _, p := range candidates {
 		if strings.TrimSpace(p) == "" {
 			continue
@@ -138,18 +141,52 @@ func readLocalConfig() (*fileConfig, string) {
 		switch {
 		case strings.HasSuffix(strings.ToLower(p), ".yaml") || strings.HasSuffix(strings.ToLower(p), ".yml"):
 			if yaml.Unmarshal(b, &fc) == nil {
+				hasDB := strings.TrimSpace(fc.DB.Type) != "" || strings.TrimSpace(fc.DB.Path) != "" || strings.TrimSpace(fc.DB.DSN) != ""
 				if abs, err := filepath.Abs(p); err == nil {
-					return &fc, abs
+					if hasDB {
+						return &fc, abs
+					}
+					if fallbackFC == nil {
+						cp := fc
+						fallbackFC = &cp
+						fallbackPath = abs
+					}
+					continue
 				}
-				return &fc, p
+				if hasDB {
+					return &fc, p
+				}
+				if fallbackFC == nil {
+					cp := fc
+					fallbackFC = &cp
+					fallbackPath = p
+				}
+				continue
 			}
 		case strings.HasSuffix(strings.ToLower(p), ".json"):
 			// Support both new nested JSON and the legacy flat JSON produced by older installers.
 			if json.Unmarshal(b, &fc) == nil {
+				hasDB := strings.TrimSpace(fc.DB.Type) != "" || strings.TrimSpace(fc.DB.Path) != "" || strings.TrimSpace(fc.DB.DSN) != ""
 				if abs, err := filepath.Abs(p); err == nil {
-					return &fc, abs
+					if hasDB {
+						return &fc, abs
+					}
+					if fallbackFC == nil {
+						cp := fc
+						fallbackFC = &cp
+						fallbackPath = abs
+					}
+					continue
 				}
-				return &fc, p
+				if hasDB {
+					return &fc, p
+				}
+				if fallbackFC == nil {
+					cp := fc
+					fallbackFC = &cp
+					fallbackPath = p
+				}
+				continue
 			}
 			var legacy struct {
 				DBType string `json:"db_type"`
@@ -160,26 +197,79 @@ func readLocalConfig() (*fileConfig, string) {
 				fc.DB.Type = legacy.DBType
 				fc.DB.Path = legacy.DBPath
 				fc.DB.DSN = legacy.DBDSN
+				hasDB := strings.TrimSpace(fc.DB.Type) != "" || strings.TrimSpace(fc.DB.Path) != "" || strings.TrimSpace(fc.DB.DSN) != ""
 				if abs, err := filepath.Abs(p); err == nil {
-					return &fc, abs
+					if hasDB {
+						return &fc, abs
+					}
+					if fallbackFC == nil {
+						cp := fc
+						fallbackFC = &cp
+						fallbackPath = abs
+					}
+					continue
 				}
-				return &fc, p
+				if hasDB {
+					return &fc, p
+				}
+				if fallbackFC == nil {
+					cp := fc
+					fallbackFC = &cp
+					fallbackPath = p
+				}
+				continue
 			}
 		default:
 			// If extension is unknown, try YAML then JSON.
 			if yaml.Unmarshal(b, &fc) == nil {
+				hasDB := strings.TrimSpace(fc.DB.Type) != "" || strings.TrimSpace(fc.DB.Path) != "" || strings.TrimSpace(fc.DB.DSN) != ""
 				if abs, err := filepath.Abs(p); err == nil {
-					return &fc, abs
+					if hasDB {
+						return &fc, abs
+					}
+					if fallbackFC == nil {
+						cp := fc
+						fallbackFC = &cp
+						fallbackPath = abs
+					}
+					continue
 				}
-				return &fc, p
+				if hasDB {
+					return &fc, p
+				}
+				if fallbackFC == nil {
+					cp := fc
+					fallbackFC = &cp
+					fallbackPath = p
+				}
+				continue
 			}
 			if json.Unmarshal(b, &fc) == nil {
+				hasDB := strings.TrimSpace(fc.DB.Type) != "" || strings.TrimSpace(fc.DB.Path) != "" || strings.TrimSpace(fc.DB.DSN) != ""
 				if abs, err := filepath.Abs(p); err == nil {
-					return &fc, abs
+					if hasDB {
+						return &fc, abs
+					}
+					if fallbackFC == nil {
+						cp := fc
+						fallbackFC = &cp
+						fallbackPath = abs
+					}
+					continue
 				}
-				return &fc, p
+				if hasDB {
+					return &fc, p
+				}
+				if fallbackFC == nil {
+					cp := fc
+					fallbackFC = &cp
+					fallbackPath = p
+				}
 			}
 		}
+	}
+	if fallbackFC != nil {
+		return fallbackFC, fallbackPath
 	}
 	return nil, ""
 }

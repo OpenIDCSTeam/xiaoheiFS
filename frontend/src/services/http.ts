@@ -14,6 +14,9 @@ export const http = axios.create({
 
 let realnameModalOpen = false;
 
+const isAuthLoginRequest = (url: string): boolean =>
+  url === "/api/v1/auth/login" || url === "/admin/api/v1/auth/login";
+
 http.interceptors.request.use((config) => {
   const user = useAuthStore();
   const admin = useAdminAuthStore();
@@ -43,6 +46,10 @@ http.interceptors.response.use(
     const url = error?.config?.url || "";
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (status === 401) {
+      if (isAuthLoginRequest(url)) {
+        message.error(msg || "登录失败");
+        return Promise.reject(error);
+      }
       if (url.startsWith("/admin/")) {
         const admin = useAdminAuthStore();
         admin.logout();

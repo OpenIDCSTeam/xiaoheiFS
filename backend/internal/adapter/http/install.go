@@ -64,8 +64,11 @@ func (h *Handler) InstallDBCheck(c *gin.Context) {
 
 	dbType := strings.ToLower(strings.TrimSpace(payload.DB.Type))
 	switch dbType {
-	case "", "sqlite":
-		dbType = "sqlite"
+	case "":
+		c.JSON(http.StatusBadRequest, gin.H{"error": "db.type required"})
+		return
+	case "sqlite":
+		// ok
 	case "mysql":
 		// ok
 	case "postgres", "postgresql":
@@ -133,10 +136,10 @@ func (h *Handler) InstallRun(c *gin.Context) {
 	}
 
 	dbType := strings.ToLower(strings.TrimSpace(payload.DB.Type))
-	if dbType == "" {
-		dbType = "sqlite"
-	}
 	switch dbType {
+	case "":
+		c.JSON(http.StatusBadRequest, gin.H{"error": "db.type required"})
+		return
 	case "sqlite":
 		// ok
 	case "mysql":
