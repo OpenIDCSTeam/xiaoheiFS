@@ -29,6 +29,9 @@ func installLockPath() string {
 	if strings.TrimSpace(installLockPathOverride) != "" {
 		return strings.TrimSpace(installLockPathOverride)
 	}
+	if configPath := strings.TrimSpace(config.LocalConfigPath()); configPath != "" {
+		return filepath.Join(filepath.Dir(configPath), "install.lock")
+	}
 	return "install.lock"
 }
 

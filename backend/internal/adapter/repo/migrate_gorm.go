@@ -9,7 +9,7 @@ import (
 // migrateGorm creates the schema for non-sqlite databases.
 // The runtime repository uses database/sql with portable SQL, so column names must match the queries.
 func migrateGorm(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&userRow{},
 		&captchaRow{},
 		&verificationCodeRow{},
@@ -53,7 +53,47 @@ func migrateGorm(db *gorm.DB) error {
 		&realnameVerificationRow{},
 		&pluginInstallationRow{},
 		&pluginPaymentMethodRow{},
-	)
+	); err != nil {
+		return err
+	}
+	if db.Dialector != nil && db.Dialector.Name() == "mysql" {
+		if err := fixMySQLPartialUniqueIndexes(db); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MySQL does not support partial unique indexes. We keep the same index names but make them non-unique.
+func fixMySQLPartialUniqueIndexes(db *gorm.DB) error {
+	if db.Migrator().HasIndex(&goodsTypeRow{}, "idx_goods_types_code_unique") {
+		if err := db.Exec("DROP INDEX idx_goods_types_code_unique ON goods_types").Error; err != nil {
+			return err
+		}
+	}
+	if err := db.Exec("CREATE INDEX idx_goods_types_code_unique ON goods_types(code)").Error; err != nil {
+		return err
+	}
+
+	if db.Migrator().HasIndex(&planGroupRow{}, "idx_plan_groups_gt_line_unique") {
+		if err := db.Exec("DROP INDEX idx_plan_groups_gt_line_unique ON plan_groups").Error; err != nil {
+			return err
+		}
+	}
+	if err := db.Exec("CREATE INDEX idx_plan_groups_gt_line_unique ON plan_groups(goods_type_id, line_id)").Error; err != nil {
+		return err
+	}
+
+	if db.Migrator().HasIndex(&packageRow{}, "idx_packages_gt_product_unique") {
+		if err := db.Exec("DROP INDEX idx_packages_gt_product_unique ON packages").Error; err != nil {
+			return err
+		}
+	}
+	if err := db.Exec("CREATE INDEX idx_packages_gt_product_unique ON packages(goods_type_id, plan_group_id, product_id)").Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type userRow struct {

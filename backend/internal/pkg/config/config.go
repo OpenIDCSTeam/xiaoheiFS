@@ -108,6 +108,13 @@ func Load() Config {
 	return cfg
 }
 
+// LocalConfigPath returns the absolute path to the local app.config.* file if found.
+// It is used by installer logic to place/read install.lock next to the config.
+func LocalConfigPath() string {
+	_, configPath := readLocalConfig()
+	return configPath
+}
+
 func readLocalConfig() (*fileConfig, string) {
 	candidates := []string{
 		localConfigYAML,
