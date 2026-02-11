@@ -14,7 +14,7 @@ import (
 	"xiaoheiplay/internal/usecase"
 )
 
-func newTestRepo(t *testing.T) *repo.SQLiteRepo {
+func newTestRepo(t *testing.T) *repo.GormRepo {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "usecase.db")
@@ -28,16 +28,16 @@ func newTestRepo(t *testing.T) *repo.SQLiteRepo {
 	if err := repo.Migrate(conn.Gorm); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := seed.EnsureSettings(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsureSettingsGorm(conn.Gorm); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
-	if err := seed.EnsurePermissionDefaults(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsurePermissionDefaultsGorm(conn.Gorm); err != nil {
 		t.Fatalf("seed permissions: %v", err)
 	}
-	if err := seed.EnsurePermissionGroups(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsurePermissionGroupsGorm(conn.Gorm); err != nil {
 		t.Fatalf("seed permission groups: %v", err)
 	}
-	return repo.NewSQLiteRepo(conn.Gorm)
+	return repo.NewGormRepo(conn.Gorm)
 }
 
 func TestCatalogService_Getters(t *testing.T) {

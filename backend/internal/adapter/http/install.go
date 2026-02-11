@@ -18,6 +18,7 @@ import (
 	"xiaoheiplay/internal/domain"
 	"xiaoheiplay/internal/pkg/config"
 	"xiaoheiplay/internal/pkg/db"
+	"xiaoheiplay/internal/usecase"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
@@ -193,30 +194,30 @@ func (h *Handler) InstallRun(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "migrate: " + err.Error()})
 		return
 	}
-	if err := seed.EnsureSettings(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsureSettingsGorm(conn.Gorm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed settings: " + err.Error()})
 		return
 	}
-	if err := seed.EnsurePermissionDefaults(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsurePermissionDefaultsGorm(conn.Gorm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed permission defaults: " + err.Error()})
 		return
 	}
-	if err := seed.EnsurePermissionGroups(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsurePermissionGroupsGorm(conn.Gorm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed permission groups: " + err.Error()})
 		return
 	}
 	// CMS defaults and base seed (only if empty) to keep install snappy and idempotent.
-	if err := seed.EnsureCMSDefaults(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsureCMSDefaultsGorm(conn.Gorm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed cms defaults: " + err.Error()})
 		return
 	}
-	if err := seed.SeedIfEmpty(conn.SQL); err != nil {
+	if err := seed.SeedIfEmptyGorm(conn.Gorm); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed: " + err.Error()})
 		return
 	}
 
 	ctx := context.Background()
-	repoAny := repo.NewSQLiteRepo(conn.Gorm)
+	repoAny := repo.NewGormRepo(conn.Gorm)
 
 	_ = repoAny.UpsertSetting(ctx, domain.Setting{Key: "site_name", ValueJSON: siteName})
 	if siteURL != "" {
@@ -226,10 +227,18 @@ func (h *Handler) InstallRun(c *gin.Context) {
 	if _, err := repoAny.GetUserByUsernameOrEmail(ctx, adminUser); err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "admin already exists"})
 		return
+	} else if !errors.Is(err, usecase.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query admin failed: " + err.Error()})
+		return
 	}
 
-	var superAdminGroupID int64
-	if err := conn.SQL.QueryRow(`SELECT id FROM permission_groups WHERE name = ?`, "超级管理员").Scan(&superAdminGroupID); err != nil {
+	groups, err := repoAny.ListPermissionGroups(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "permission group query failed: " + err.Error()})
+		return
+	}
+	superAdminGroupID, ok := findSuperAdminGroupID(groups)
+	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "permission group missing"})
 		return
 	}
@@ -327,4 +336,28 @@ func isDuplicateEntryError(err error) bool {
 	return strings.Contains(msg, "duplicate entry") ||
 		strings.Contains(msg, "unique constraint") ||
 		strings.Contains(msg, "constraint failed")
+}
+
+func findSuperAdminGroupID(groups []domain.PermissionGroup) (int64, bool) {
+	if len(groups) == 0 {
+		return 0, false
+	}
+	for _, group := range groups {
+		var perms []string
+		if json.Unmarshal([]byte(group.PermissionsJSON), &perms) != nil {
+			continue
+		}
+		for _, p := range perms {
+			if strings.TrimSpace(p) == "*" {
+				return group.ID, true
+			}
+		}
+	}
+	for _, group := range groups {
+		name := strings.ToLower(strings.TrimSpace(group.Name))
+		if strings.Contains(name, "admin") || strings.Contains(name, "管理员") {
+			return group.ID, true
+		}
+	}
+	return groups[0].ID, true
 }

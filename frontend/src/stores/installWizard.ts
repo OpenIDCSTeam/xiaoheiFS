@@ -39,7 +39,7 @@ export const useInstallWizardStore = defineStore("installWizard", {
   state: (): InstallWizardState => {
     const saved = safeLoad() || {};
     return {
-      dbType: saved.dbType === "mysql" ? "mysql" : "sqlite",
+      dbType: saved.dbType === "sqlite" ? "sqlite" : "mysql",
       sqlitePath: saved.sqlitePath || "./data/app.db",
       mysql: {
         host: saved.mysql?.host || "127.0.0.1",
@@ -106,4 +106,3 @@ export const useInstallWizardStore = defineStore("installWizard", {
     }
   }
 });
-

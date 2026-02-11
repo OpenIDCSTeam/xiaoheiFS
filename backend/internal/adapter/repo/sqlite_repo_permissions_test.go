@@ -12,7 +12,7 @@ import (
 	"xiaoheiplay/internal/pkg/db"
 )
 
-func newTestRepo(t *testing.T) (*sql.DB, *repo.SQLiteRepo) {
+func newTestRepo(t *testing.T) (*sql.DB, *repo.GormRepo) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "repo.db")
@@ -26,7 +26,7 @@ func newTestRepo(t *testing.T) (*sql.DB, *repo.SQLiteRepo) {
 	if err := repo.Migrate(conn.Gorm); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return conn.SQL, repo.NewSQLiteRepo(conn.Gorm)
+	return conn.SQL, repo.NewGormRepo(conn.Gorm)
 }
 
 func TestSQLiteRepo_PermissionsAndGroups(t *testing.T) {

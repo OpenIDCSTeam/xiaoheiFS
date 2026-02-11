@@ -13,7 +13,7 @@ import (
 )
 
 type Env struct {
-	Repo          *repo.SQLiteRepo
+	Repo          *repo.GormRepo
 	JWTSecret     string
 	Automation    *testutil.FakeAutomationClient
 	PaymentReg    *testutil.FakePaymentRegistry

@@ -136,7 +136,7 @@ func TestVPSService_RenewAndEmergency(t *testing.T) {
 	}
 }
 
-func createVPSInstance(t *testing.T, repo *repo.SQLiteRepo, userID int64, automationID string) domain.VPSInstance {
+func createVPSInstance(t *testing.T, repo *repo.GormRepo, userID int64, automationID string) domain.VPSInstance {
 	t.Helper()
 	order := domain.Order{UserID: userID, OrderNo: "ORD-VPS-X", Status: domain.OrderStatusApproved, TotalAmount: 1000, Currency: "CNY"}
 	if err := repo.CreateOrder(context.Background(), &order); err != nil {

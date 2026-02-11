@@ -22,7 +22,7 @@ import (
 	"xiaoheiplay/internal/pkg/db"
 )
 
-func NewTestDB(t *testing.T, withCMS bool) (*sql.DB, *repo.SQLiteRepo) {
+func NewTestDB(t *testing.T, withCMS bool) (*sql.DB, *repo.GormRepo) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -36,24 +36,24 @@ func NewTestDB(t *testing.T, withCMS bool) (*sql.DB, *repo.SQLiteRepo) {
 	if err := repo.Migrate(conn.Gorm); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := seed.EnsureSettings(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsureSettingsGorm(conn.Gorm); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
-	if err := seed.EnsurePermissionDefaults(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsurePermissionDefaultsGorm(conn.Gorm); err != nil {
 		t.Fatalf("seed permissions: %v", err)
 	}
-	if err := seed.EnsurePermissionGroups(conn.SQL, conn.Dialect); err != nil {
+	if err := seed.EnsurePermissionGroupsGorm(conn.Gorm); err != nil {
 		t.Fatalf("seed permission groups: %v", err)
 	}
 	if withCMS {
-		if err := seed.EnsureCMSDefaults(conn.SQL, conn.Dialect); err != nil {
+		if err := seed.EnsureCMSDefaultsGorm(conn.Gorm); err != nil {
 			t.Fatalf("seed cms: %v", err)
 		}
 	}
-	return conn.SQL, repo.NewSQLiteRepo(conn.Gorm)
+	return conn.SQL, repo.NewGormRepo(conn.Gorm)
 }
 
-func CreateUser(t *testing.T, repo *repo.SQLiteRepo, username, email, password string) domain.User {
+func CreateUser(t *testing.T, repo *repo.GormRepo, username, email, password string) domain.User {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -72,7 +72,7 @@ func CreateUser(t *testing.T, repo *repo.SQLiteRepo, username, email, password s
 	return user
 }
 
-func CreateAdmin(t *testing.T, repo *repo.SQLiteRepo, username, email, password string, groupID int64) domain.User {
+func CreateAdmin(t *testing.T, repo *repo.GormRepo, username, email, password string, groupID int64) domain.User {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

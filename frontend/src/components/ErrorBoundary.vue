@@ -21,8 +21,13 @@ const message = ref("");
 const reload = () => window.location.reload();
 
 onErrorCaptured((err) => {
+  const msg = String((err as any)?.message || err || "");
+  // Keep the app running for expected request errors handled by page logic.
+  if (msg.includes("Request failed with status code")) {
+    return false;
+  }
   hasError.value = true;
-  message.value = String((err as any)?.message || err || "");
+  message.value = msg;
   // prevent bubbling to global handler so we don't end up with a blank page
   return false;
 });

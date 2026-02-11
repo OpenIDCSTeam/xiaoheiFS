@@ -4246,10 +4246,6 @@ func (h *Handler) AdminRegionCreate(c *gin.Context) {
 	if region.GoodsTypeID <= 0 {
 		region.GoodsTypeID = h.defaultGoodsTypeID(c)
 	}
-	if region.GoodsTypeID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "goods_type_id required"})
-		return
-	}
 	if err := h.catalogSvc.CreateRegion(c, &region); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -4346,8 +4342,7 @@ func (h *Handler) AdminPlanGroupCreate(c *gin.Context) {
 		plan.GoodsTypeID = region.GoodsTypeID
 	}
 	if plan.GoodsTypeID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "goods_type_id required"})
-		return
+		plan.GoodsTypeID = h.defaultGoodsTypeID(c)
 	}
 	if err := h.catalogSvc.CreatePlanGroup(c, &plan); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -4590,8 +4585,7 @@ func (h *Handler) AdminPackageCreate(c *gin.Context) {
 		pkg.GoodsTypeID = plan.GoodsTypeID
 	}
 	if pkg.GoodsTypeID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "goods_type_id required"})
-		return
+		pkg.GoodsTypeID = h.defaultGoodsTypeID(c)
 	}
 	if err := h.catalogSvc.CreatePackage(c, &pkg); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

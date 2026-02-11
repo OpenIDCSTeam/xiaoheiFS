@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"xiaoheiplay/internal/domain"
 	"xiaoheiplay/internal/testutil"
 	"xiaoheiplay/internal/usecase"
 )
@@ -128,6 +129,15 @@ func TestIntegrationService_Config(t *testing.T) {
 
 func TestIntegrationService_SyncAutomation(t *testing.T) {
 	_, repo := testutil.NewTestDB(t, false)
+	gt := domain.GoodsType{
+		Code:      "default",
+		Name:      "Default",
+		Active:    true,
+		SortOrder: 1,
+	}
+	if err := repo.CreateGoodsType(context.Background(), &gt); err != nil {
+		t.Fatalf("create goods type: %v", err)
+	}
 	auto := fakeAutomationSync{
 		areas: []usecase.AutomationArea{{ID: 1, Name: "Area1", State: 1}},
 		lines: []usecase.AutomationLine{{ID: 10, Name: "Line1", AreaID: 1, State: 1}},

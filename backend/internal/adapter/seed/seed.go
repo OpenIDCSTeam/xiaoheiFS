@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 type planSeed struct {
@@ -241,10 +243,10 @@ func SeedIfEmpty(db *sql.DB) error {
 	csAdminPerms := `["user.list","user.view","order.list","order.view","vps.list","vps.view"]`
 	financeAdminPerms := `["order.list","order.view","order.approve","order.reject","audit_log.view"]`
 
-	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?)`, "超级管理员", "拥有所有权限", superAdminPerms)
-	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?)`, "运维管理员", "负责VPS运维和订单审核", opsAdminPerms)
-	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?)`, "客服管理员", "负责用户和订单查询", csAdminPerms)
-	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?)`, "财务管理员", "负责订单审核和财务管理", financeAdminPerms)
+	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, "超级管理员", "拥有所有权限", superAdminPerms)
+	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, "运维管理员", "负责VPS运维和订单审核", opsAdminPerms)
+	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, "客服管理员", "负责用户和订单查询", csAdminPerms)
+	_, _ = tx.Exec(`INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, "财务管理员", "负责订单审核和财务管理", financeAdminPerms)
 
 	_, _ = tx.Exec(`INSERT INTO billing_cycles(name,months,multiplier,min_qty,max_qty,active,sort_order) VALUES (?,?,?,?,?,?,?)`, "monthly", 1, 1.0, 1, 24, 1, 1)
 	_, _ = tx.Exec(`INSERT INTO billing_cycles(name,months,multiplier,min_qty,max_qty,active,sort_order) VALUES (?,?,?,?,?,?,?)`, "quarterly", 3, 2.8, 1, 12, 1, 2)
@@ -380,9 +382,9 @@ func EnsurePermissionGroups(db *sql.DB, dialect string) error {
 	csAdminPerms := `["dashboard.overview","dashboard.revenue","user.list","user.view","order.list","order.view","vps.list","vps.view"]`
 	financeAdminPerms := `["dashboard.overview","dashboard.revenue","order.list","order.view","order.approve","order.reject","audit_log.view"]`
 
-	insertSQL := `INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?) ON CONFLICT(name) DO NOTHING`
+	insertSQL := `INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(name) DO NOTHING`
 	if strings.EqualFold(strings.TrimSpace(dialect), "mysql") {
-		insertSQL = `INSERT INTO permission_groups(name,description,permissions_json) VALUES (?,?,?) ON DUPLICATE KEY UPDATE name=name`
+		insertSQL = `INSERT INTO permission_groups(name,description,permissions_json,created_at,updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE name=name`
 	}
 
 	_, err := db.Exec(insertSQL, "超级管理员", "拥有所有权限", superAdminPerms)
@@ -626,4 +628,44 @@ func getSettingInt(db *sql.DB, key string, fallback int) int {
 		return fallback
 	}
 	return val
+}
+
+func SeedIfEmptyGorm(gdb *gorm.DB) error {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return err
+	}
+	return SeedIfEmpty(sqlDB)
+}
+
+func EnsureSettingsGorm(gdb *gorm.DB) error {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return err
+	}
+	return EnsureSettings(sqlDB, gdb.Dialector.Name())
+}
+
+func EnsurePermissionDefaultsGorm(gdb *gorm.DB) error {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return err
+	}
+	return EnsurePermissionDefaults(sqlDB, gdb.Dialector.Name())
+}
+
+func EnsurePermissionGroupsGorm(gdb *gorm.DB) error {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return err
+	}
+	return EnsurePermissionGroups(sqlDB, gdb.Dialector.Name())
+}
+
+func EnsureCMSDefaultsGorm(gdb *gorm.DB) error {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return err
+	}
+	return EnsureCMSDefaults(sqlDB, gdb.Dialector.Name())
 }
