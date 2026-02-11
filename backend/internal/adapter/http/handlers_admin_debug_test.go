@@ -57,6 +57,10 @@ func TestHandlers_AdminAPIKeysAndDebug(t *testing.T) {
 	if rec.Code != http.StatusGone {
 		t.Fatalf("automation config update: %d", rec.Code)
 	}
+	gt := domain.GoodsType{Code: "default", Name: "Default", Active: true}
+	if err := env.Repo.CreateGoodsType(context.Background(), &gt); err != nil {
+		t.Fatalf("create goods type: %v", err)
+	}
 	rec = testutil.DoJSON(t, env.Router, http.MethodPost, "/admin/api/v1/integrations/automation/sync?mode=merge", nil, token)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("automation sync: %d", rec.Code)
