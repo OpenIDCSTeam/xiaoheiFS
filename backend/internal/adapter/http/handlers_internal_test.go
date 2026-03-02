@@ -20,7 +20,7 @@ func TestContainsDisallowedHTML(t *testing.T) {
 }
 
 func TestBuildUploadName(t *testing.T) {
-	name := buildUploadName("image.png")
+	name := buildUploadName("image/png")
 	if !strings.HasSuffix(name, ".png") {
 		t.Fatalf("expected .png suffix")
 	}

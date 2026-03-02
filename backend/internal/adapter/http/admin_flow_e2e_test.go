@@ -100,6 +100,17 @@ func TestAdminFlow_E2E(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("change password: %d", rec.Code)
 	}
+	rec = testutil.DoJSON(t, env.Router, http.MethodPost, "/admin/api/v1/auth/login", map[string]any{
+		"username": admin.Username,
+		"password": "pass1234",
+	}, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin relogin after password change: %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &loginResp); err != nil {
+		t.Fatalf("decode relogin: %v", err)
+	}
+	token = loginResp.AccessToken
 
 	rec = testutil.DoJSON(t, env.Router, http.MethodDelete, "/admin/api/v1/packages/"+testutil.Itoa(pkgID), nil, token)
 	if rec.Code != http.StatusOK {
