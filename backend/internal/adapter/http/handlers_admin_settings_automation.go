@@ -79,24 +79,102 @@ func (h *Handler) AdminSettingsUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrInvalidBody.Error()})
 		return
 	}
+	
+	// 批量更新模式
 	if len(payload.Items) > 0 {
+		// 验证所有配置项
 		for _, item := range payload.Items {
 			if strings.TrimSpace(item.Key) == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrInvalidKey.Error()})
 				return
 			}
+			// 特殊验证：版权信息
+			if item.Key == "copyright_text" {
+				if strings.TrimSpace(item.Value) == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "版权信息不能为空"})
+					return
+				}
+				if len([]rune(item.Value)) > 200 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "版权信息不能超过200字"})
+					return
+				}
+			}
+			// 特殊验证：备案信息列表
+			if item.Key == "beian_info_list" {
+				if err := validateBeianInfoList(item.Value); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+			}
+		}
+		
+		// 执行更新
+		for _, item := range payload.Items {
 			if err := h.adminSvc.UpdateSetting(c, getUserID(c), item.Key, item.Value); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 		}
 	} else {
+		// 单个更新模式
+		if strings.TrimSpace(payload.Key) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrInvalidKey.Error()})
+			return
+		}
+		
+		// 特殊验证：版权信息
+		if payload.Key == "copyright_text" {
+			if strings.TrimSpace(payload.Value) == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "版权信息不能为空"})
+				return
+			}
+			if len([]rune(payload.Value)) > 200 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "版权信息不能超过200字"})
+				return
+			}
+		}
+		
+		// 特殊验证：备案信息列表
+		if payload.Key == "beian_info_list" {
+			if err := validateBeianInfoList(payload.Value); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		
 		if err := h.adminSvc.UpdateSetting(c, getUserID(c), payload.Key, payload.Value); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// validateBeianInfoList 验证备案信息列表的格式
+func validateBeianInfoList(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "[]" {
+		return nil
+	}
+	
+	var beianList []struct {
+		Number  string `json:"number"`
+		IconURL string `json:"icon_url"`
+		LinkURL string `json:"link_url"`
+	}
+	
+	if err := json.Unmarshal([]byte(value), &beianList); err != nil {
+		return fmt.Errorf("备案信息格式错误: %v", err)
+	}
+	
+	for i, beian := range beianList {
+		// 如果填写了任何字段，备案号必填
+		if (beian.IconURL != "" || beian.LinkURL != "") && strings.TrimSpace(beian.Number) == "" {
+			return fmt.Errorf("备案信息 %d 的备案号不能为空", i+1)
+		}
+	}
+	
+	return nil
 }
 
 func (h *Handler) AdminPushTokenRegister(c *gin.Context) {
