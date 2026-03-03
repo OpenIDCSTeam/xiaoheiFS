@@ -39,14 +39,18 @@ All incoming data validation in the HTTP handler layer MUST use the `go-playgrou
 
 ### II. Centralized Error Management (NON-NEGOTIABLE)
 
-All errors MUST be defined in `internal/domain/errors.go`. Direct use of `errors.New()` or `fmt.Errorf()` outside of this file is prohibited in handler, service, and repository layers.
+All sentinel errors (domain-level error identifiers) MUST be defined in `internal/domain/errors.go`. Direct use of `errors.New()` outside of this file is prohibited in handler, service, and repository layers.
 
 **Rules:**
 - Define all domain errors as package-level `var` declarations in `internal/domain/errors.go`
 - Import errors from `internal/app/shared/errors.go` for application-layer aliases when needed
-- Never create ad-hoc errors in handlers or services
-- Wrap errors with context using `fmt.Errorf("context: %w", err)` when propagating
+- Never create ad-hoc sentinel errors in handlers or services using `errors.New()`
+- **When propagating errors**: Wrap errors with context using `fmt.Errorf("context: %w", err)` — this is REQUIRED for error propagation, not prohibited
 - HTTP status mapping happens only in the handler layer via the existing error-to-status conventions
+
+**Distinction:**
+- `errors.New("message")` — **ONLY in `internal/domain/errors.go`** for defining reusable sentinel errors
+- `fmt.Errorf("context: %w", err)` — **REQUIRED anywhere** when wrapping and propagating errors up the call stack
 
 **Rationale:** Centralized errors ensure consistent error handling, enable compile-time verification, and prevent error string drift across the codebase.
 
