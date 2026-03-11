@@ -170,9 +170,9 @@ jobs:
           echo "[2/3] Build built-in plugins..."
           cd backend
           
-          export CGO_ENABLED=0
-          export GOOS=linux
-          export GOARCH=amd64
+          go env -w CGO_ENABLED=0
+          go env -w GOOS=linu
+          go env -w GOARCH=amd64
           
           PLUGIN_LIST=(
             "payment/ezpay"
@@ -264,9 +264,9 @@ jobs:
           # 交叉编译后端
           echo "  Cross-compiling backend for FreeBSD..."
           cd backend
-          export CGO_ENABLED=0
-          export GOOS=freebsd
-          export GOARCH=amd64
+          go env -w CGO_ENABLED=0
+          go env -w GOOS=freebsd
+          go env -w GOARCH=amd64
           go build -o ../build/freebsd/server ./cmd/server
           cd ..
 
@@ -277,9 +277,9 @@ jobs:
           echo "[2/3] Build built-in plugins (FreeBSD cross)..."
           cd backend
           
-          export CGO_ENABLED=0
-          export GOOS=freebsd
-          export GOARCH=amd64
+          go env -w CGO_ENABLED=0
+          go env -w GOOS=freebsd
+          go env -w GOARCH=amd64
           
           PLUGIN_LIST=(
             "payment/ezpay"
