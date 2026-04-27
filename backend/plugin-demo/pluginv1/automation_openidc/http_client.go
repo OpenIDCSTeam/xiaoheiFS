@@ -229,12 +229,10 @@ type HSConfig struct {
 // NATRule NAT 端口转发规则
 type NATRule struct {
 	RuleIndex   int    `json:"rule_index"`
-	HostPort    int    `json:"host_port"`
-	VMPort      int    `json:"vm_port"`
-	Protocol    string `json:"protocol"`
-	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"`
-	CreatedTime string `json:"created_time"`
+	WanPort     int    `json:"wan_port"`     // 宿主机端口（外部端口）
+	LanPort     int    `json:"lan_port"`     // 虚拟机端口（内部端口）
+	LanAddr     string `json:"lan_addr"`     // 虚拟机内网地址
+	NatTips     string `json:"nat_tips"`     // 备注说明
 }
 
 // BackupInfo 备份信息
@@ -751,16 +749,26 @@ func (c *Client) PowerVM(ctx context.Context, hsName, vmUUID, action string) err
 }
 
 // GetVMStatus 获取虚拟机状态（监控数据）
-func (c *Client) GetVMStatus(ctx context.Context, hsName, vmUUID string) (VMStatus, error) {
+//
+// HostAgent /api/client/status/{hs}/{vm} 返回的字段名在不同版本间可能不一致，
+// 因此先用 map[string]any 灵活解析，再通过多候选字段名提取值，确保兼容性。
+func (c *Client) GetVMStatus(ctx context.Context, hsName, vmUUID string) (map[string]any, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/client/status/"+hsName+"/"+vmUUID, nil)
 	if err != nil {
-		return VMStatus{}, err
+		return nil, err
 	}
-	var status VMStatus
-	if err := json.Unmarshal(resp.Data, &status); err != nil {
-		return VMStatus{}, fmt.Errorf("decode vm status: %w", err)
+	var raw map[string]any
+	if err := json.Unmarshal(resp.Data, &raw); err != nil {
+		return nil, fmt.Errorf("decode vm status: %w", err)
 	}
-	return status, nil
+	if pluginLog != nil {
+		preview := string(resp.Data)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		pluginLog.Printf("[monitor] GetVMStatus hs=%s vm=%s raw=%s", hsName, vmUUID, preview)
+	}
+	return raw, nil
 }
 
 // GetRemoteAccess 获取控制台访问地址（VNC/SSH）
@@ -973,10 +981,10 @@ func (c *Client) ListNATRules(ctx context.Context, hsName, vmUUID string) ([]NAT
 // AddNATRule 添加 NAT 规则
 func (c *Client) AddNATRule(ctx context.Context, hsName, vmUUID string, hostPort, vmPort int, protocol, description string) error {
 	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/natadd/"+hsName+"/"+vmUUID, map[string]any{
-		"host_port":   hostPort,
-		"vm_port":     vmPort,
-		"protocol":    protocol,
-		"description": description,
+		"wan_port": hostPort,
+		"lan_port": vmPort,
+		"protocol": protocol,
+		"nat_tips": description,
 	})
 	return err
 }
@@ -1031,6 +1039,171 @@ func (c *Client) DeleteBackup(ctx context.Context, hsName, vmUUID, backupName st
 		"backup_name": backupName,
 	})
 	return err
+}
+
+// ---- 快照管理 ----
+//
+// HostAgent 没有独立的快照 API，"快照" 功能通过备份（backup）接口实现。
+// ListSnapshots / CreateSnapshot / RestoreSnapshot / DeleteSnapshot 均映射到
+// /api/client/backup/* 接口，对外保持 SnapshotInfo 的字段形态不变。
+
+// SnapshotInfo 快照信息（由 backup 数据适配而来）
+type SnapshotInfo struct {
+	SnapshotName string `json:"snapshot_name"`
+	Description  string `json:"description"`
+	SizeMB       int    `json:"size_mb"`
+	CreatedTime  string `json:"created_time"`
+	CreatedBy    string `json:"created_by"`
+	VMState      string `json:"vm_state"`
+}
+
+// backupRawInfo HostAgent backup 接口返回的原始字段
+type backupRawInfo struct {
+	BackupName  string `json:"backup_name"`
+	BackupHint  string `json:"backup_hint"`
+	BackupPath  string `json:"backup_path"`
+	BackupTime  int64  `json:"backup_time"`
+	CreatedTime string `json:"created_time"`
+	SizeMB      int    `json:"size_mb"`
+	CreatedBy   string `json:"created_by"`
+	VMState     string `json:"vm_state"`
+}
+
+// ListSnapshots 获取快照列表（映射 backup 列表）
+func (c *Client) ListSnapshots(ctx context.Context, hsName, vmUUID string) ([]SnapshotInfo, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/client/backup/detail/"+hsName+"/"+vmUUID, nil)
+	if err != nil {
+		return nil, err
+	}
+	// 兼容两种返回结构：
+	//   1) 直接是数组：[{backup_name: ...}, ...]
+	//   2) 对象包裹：{"backups": [...]} 或 {"config": {"backups": [...]}}
+	var raws []backupRawInfo
+	if len(resp.Data) > 0 && resp.Data[0] == '[' {
+		if err := json.Unmarshal(resp.Data, &raws); err != nil {
+			return nil, fmt.Errorf("decode backups: %w", err)
+		}
+	} else {
+		var wrap struct {
+			Backups []backupRawInfo `json:"backups"`
+			Config  struct {
+				Backups []backupRawInfo `json:"backups"`
+			} `json:"config"`
+		}
+		if err := json.Unmarshal(resp.Data, &wrap); err != nil {
+			return nil, fmt.Errorf("decode backups: %w", err)
+		}
+		if len(wrap.Backups) > 0 {
+			raws = wrap.Backups
+		} else {
+			raws = wrap.Config.Backups
+		}
+	}
+	out := make([]SnapshotInfo, 0, len(raws))
+	for _, r := range raws {
+		created := r.CreatedTime
+		if created == "" && r.BackupTime > 0 {
+			created = time.Unix(r.BackupTime, 0).Format(time.RFC3339)
+		}
+		out = append(out, SnapshotInfo{
+			SnapshotName: r.BackupName,
+			Description:  r.BackupHint,
+			SizeMB:       r.SizeMB,
+			CreatedTime:  created,
+			CreatedBy:    r.CreatedBy,
+			VMState:      r.VMState,
+		})
+	}
+	return out, nil
+}
+
+// CreateSnapshot 创建快照（映射为创建 backup）
+func (c *Client) CreateSnapshot(ctx context.Context, hsName, vmUUID, snapshotName, description string) error {
+	body := map[string]any{}
+	// HostAgent 创建 backup 使用 vm_tips 作为备份说明
+	tips := description
+	if tips == "" {
+		tips = snapshotName
+	}
+	if tips != "" {
+		body["vm_tips"] = tips
+	}
+	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/backup/create/"+hsName+"/"+vmUUID, body)
+	return err
+}
+
+// RestoreSnapshot 恢复快照（映射为恢复 backup）
+func (c *Client) RestoreSnapshot(ctx context.Context, hsName, vmUUID, snapshotName string) error {
+	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/backup/restore/"+hsName+"/"+vmUUID, map[string]any{
+		"vm_back": snapshotName,
+	})
+	return err
+}
+
+// DeleteSnapshot 删除快照（映射为删除 backup）
+func (c *Client) DeleteSnapshot(ctx context.Context, hsName, vmUUID, snapshotName string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, "/api/client/backup/delete/"+hsName+"/"+vmUUID, map[string]any{
+		"vm_back": snapshotName,
+	})
+	return err
+}
+
+// ---- 防火墙管理 ----
+//
+// HostAgent 没有独立的防火墙 API，"防火墙" 功能通过 NAT 转发规则实现。
+// ListFirewallRules / AddFirewallRule / DeleteFirewallRule 均映射到已有的 NAT API，
+// 将 NAT 规则适配为前端防火墙表格期望的字段格式（direction / protocol / method / port / ip / priority）。
+
+// FirewallRule 防火墙规则（由 NAT 规则适配而来）
+type FirewallRule struct {
+	RuleID    int    `json:"rule_id"`
+	Direction string `json:"direction"` // In（NAT 转发默认入站）
+	Protocol  string `json:"protocol"`  // tcp / udp
+	Method    string `json:"method"`    // allowed（NAT 转发默认允许）
+	Port      string `json:"port"`      // 映射端口，格式 "host_port → vm_port"
+	IP        string `json:"ip"`        // 0.0.0.0（NAT 转发不限制来源 IP）
+	Priority  int    `json:"priority"`  // 优先级（NAT 规则无此概念，默认 100）
+}
+
+// ListFirewallRules 获取防火墙规则列表（映射 NAT 转发规则）
+func (c *Client) ListFirewallRules(ctx context.Context, hsName, vmUUID string) ([]FirewallRule, error) {
+	natRules, err := c.ListNATRules(ctx, hsName, vmUUID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FirewallRule, 0, len(natRules))
+	for _, r := range natRules {
+		out = append(out, FirewallRule{
+			RuleID:    r.RuleIndex,
+			Direction: "In",
+			Protocol:  "tcp",
+			Method:    "allowed",
+			Port:      fmt.Sprintf("%d → %d", r.WanPort, r.LanPort),
+			IP:        "0.0.0.0",
+			Priority:  100,
+		})
+	}
+	return out, nil
+}
+
+// AddFirewallRule 添加防火墙规则（映射为添加 NAT 转发规则）
+// 前端传入的 port 字段作为 vm_port（目标端口），host_port 设为 0 让 HostAgent 自动分配。
+func (c *Client) AddFirewallRule(ctx context.Context, hsName, vmUUID string, rule FirewallRule) error {
+	vmPort := 0
+	fmt.Sscanf(rule.Port, "%d", &vmPort)
+	if vmPort <= 0 {
+		return fmt.Errorf("invalid port: %s", rule.Port)
+	}
+	protocol := rule.Protocol
+	if protocol == "" || protocol == "all" {
+		protocol = "tcp"
+	}
+	return c.AddNATRule(ctx, hsName, vmUUID, 0, vmPort, protocol, "firewall-rule")
+}
+
+// DeleteFirewallRule 删除防火墙规则（映射为删除 NAT 转发规则）
+func (c *Client) DeleteFirewallRule(ctx context.Context, hsName, vmUUID string, ruleID int) error {
+	return c.DeleteNATRule(ctx, hsName, vmUUID, ruleID)
 }
 
 // ---- 内部工具方法 ----

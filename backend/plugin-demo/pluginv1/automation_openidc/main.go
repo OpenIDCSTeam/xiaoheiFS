@@ -147,6 +147,8 @@ func (s *coreServer) GetManifest(_ context.Context, _ *pluginv1.Empty) (*pluginv
 				pluginv1.AutomationFeature_AUTOMATION_FEATURE_LIFECYCLE,
 				pluginv1.AutomationFeature_AUTOMATION_FEATURE_PORT_MAPPING,
 				pluginv1.AutomationFeature_AUTOMATION_FEATURE_BACKUP,
+				pluginv1.AutomationFeature_AUTOMATION_FEATURE_SNAPSHOT,
+				pluginv1.AutomationFeature_AUTOMATION_FEATURE_FIREWALL,
 			},
 			NotSupportedReasons: map[int32]string{},
 			// 套餐支持反向写回 HostAgent（走 HTTP 直通，不依赖 gRPC proto 未生成符号）
@@ -1129,34 +1131,110 @@ func (a *automationServer) GetMonitor(ctx context.Context, req *pluginv1.GetMoni
 	if err != nil {
 		return nil, err
 	}
-	var status VMStatus
+	var statusMap map[string]any
 	err = a.core.retry(func() error {
 		var callErr error
-		status, callErr = c.GetVMStatus(ctx, hsName, vmUUID)
+		statusMap, callErr = c.GetVMStatus(ctx, hsName, vmUUID)
 		return callErr
 	})
 	if err != nil {
 		return nil, wrapHTTPTraceErr(err, last)
 	}
-	// 转换为财务系统期望的监控格式
-	memPercent := 0.0
-	if status.MemoryTotal > 0 {
-		memPercent = float64(status.MemoryUsage) / float64(status.MemoryTotal) * 100
+
+	// HostAgent /api/client/status 返回结构为:
+	//   {"power_status": "...", "history": [{HWStatus}, ...]}
+	// 需要从 history 数组中取最新一条 HWStatus 进行解析。
+	// 同时兼容旧版直接返回扁平 map 的情况。
+	latestStatus := statusMap
+	if historyRaw, ok := statusMap["history"]; ok {
+		if historySlice, ok := historyRaw.([]any); ok && len(historySlice) > 0 {
+			// 取最后一条（最新的）HWStatus
+			if latestEntry, ok := historySlice[len(historySlice)-1].(map[string]any); ok {
+				latestStatus = latestEntry
+			}
+		}
 	}
+
+	// 从 HWStatus 中提取监控数据，兼容多种字段名
+	cpuUsage := extractFloat(latestStatus, "cpu_usage", "cpu_percent", "cpu", "CpuUsage", "CpuStats")
+	cpuTotal := extractFloat(latestStatus, "cpu_total", "cpu_num", "CpuTotal")
+	memUsage := extractFloat(latestStatus, "mem_usage", "memory_usage", "mem_used", "MemoryUsage")
+	memTotal := extractFloat(latestStatus, "mem_total", "memory_total", "MemoryTotal")
+	hddUsage := extractFloat(latestStatus, "hdd_usage", "disk_usage", "DiskUsage")
+	hddTotal := extractFloat(latestStatus, "hdd_total", "disk_total", "DiskTotal")
+	netRx := extractFloat(latestStatus, "network_d", "network_rx_rate", "net_rx", "rx_rate", "rx_bytes", "NetworkRxRate", "bytes_in")
+	netTx := extractFloat(latestStatus, "network_u", "network_tx_rate", "net_tx", "tx_rate", "tx_bytes", "NetworkTxRate", "bytes_out")
+
+	// 计算 CPU 百分比：cpu_usage 是已用核心数，cpu_total 是总核心数
+	cpuPercent := 0.0
+	if cpuTotal > 0 {
+		cpuPercent = cpuUsage / cpuTotal * 100
+	} else if cpuUsage > 0 && cpuUsage <= 100 {
+		// 兼容直接返回百分比的情况
+		cpuPercent = cpuUsage
+	}
+
+	// 计算内存百分比：mem_usage 是已用MB，mem_total 是总MB
+	memPercent := 0.0
+	if mp := extractFloat(latestStatus, "memory_percent", "mem_percent", "memory", "MemoryStats"); mp > 0 {
+		memPercent = mp
+	} else if memTotal > 0 {
+		memPercent = memUsage / memTotal * 100
+	}
+
+	// 计算磁盘使用百分比
+	storagePercent := 0.0
+	if hddTotal > 0 {
+		storagePercent = hddUsage / hddTotal * 100
+	}
+
+	// 网络速率（HostAgent 的 network_u/network_d 单位为 Mbps）
+	// 转换为字节/秒
+	bytesIn := int64(netRx)
+	bytesOut := int64(netTx)
+	if netRx > 0 && netRx < 1000 {
+		bytesIn = int64(netRx * 1024 * 1024 / 8)
+	}
+	if netTx > 0 && netTx < 1000 {
+		bytesOut = int64(netTx * 1024 * 1024 / 8)
+	}
+
 	raw := map[string]any{
-		"CpuStats":     status.CPUUsage,
+		"CpuStats":     cpuPercent,
 		"MemoryStats":  memPercent,
-		"StorageStats": 0,
+		"StorageStats": storagePercent,
 		"NetworkStats": map[string]any{
-			"BytesSentPersec":     int64(status.NetworkTxRate * 1024 * 1024 / 8),
-			"BytesReceivedPersec": int64(status.NetworkRxRate * 1024 * 1024 / 8),
+			"BytesSentPersec":     bytesOut,
+			"BytesReceivedPersec": bytesIn,
 		},
-		"UptimeSeconds": status.UptimeSeconds,
-		"PowerState":    status.PowerState,
-		"IPAddresses":   status.IPAddresses,
 	}
 	b, _ := json.Marshal(raw)
 	return &pluginv1.GetMonitorResponse{RawJson: string(b)}, nil
+}
+
+// extractFloat 从 map 中按多个候选 key 提取 float64 值，返回第一个非零值。
+// 兼容 HostAgent 不同版本返回的字段名差异。
+func extractFloat(m map[string]any, keys ...string) float64 {
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			switch val := v.(type) {
+			case float64:
+				return val
+			case int:
+				return float64(val)
+			case int64:
+				return float64(val)
+			case json.Number:
+				f, _ := val.Float64()
+				return f
+			case string:
+				var f float64
+				fmt.Sscanf(val, "%f", &f)
+				return f
+			}
+		}
+	}
+	return 0
 }
 
 // ---- 端口映射 ----
@@ -1184,9 +1262,9 @@ func (a *automationServer) ListPortMappings(ctx context.Context, req *pluginv1.L
 	for _, rule := range rules {
 		out = append(out, &pluginv1.AutomationPortMapping{
 			Id:    int64(rule.RuleIndex),
-			Name:  rule.Description,
-			Sport: fmt.Sprintf("%d/%s", rule.HostPort, rule.Protocol),
-			Dport: int64(rule.VMPort),
+			Name:  rule.NatTips,
+			Sport: fmt.Sprintf("%d/tcp", rule.WanPort),
+			Dport: int64(rule.LanPort),
 		})
 	}
 	return &pluginv1.ListPortMappingsResponse{Items: out}, nil
@@ -1371,6 +1449,198 @@ func (a *automationServer) RestoreBackup(ctx context.Context, req *pluginv1.Rest
 		return nil, fmt.Errorf("backup index %d out of range (total: %d)", idx, len(backups))
 	}
 	if err := c.RestoreBackup(ctx, hsName, vmUUID, backups[idx].BackupName); err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	return &pluginv1.OperationResult{Ok: true}, nil
+}
+
+// ---- 快照管理 ----
+
+// ListSnapshots 获取快照列表
+func (a *automationServer) ListSnapshots(ctx context.Context, req *pluginv1.ListSnapshotsRequest) (*pluginv1.ListSnapshotsResponse, error) {
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	var snapshots []SnapshotInfo
+	err = a.core.retry(func() error {
+		var callErr error
+		snapshots, callErr = c.ListSnapshots(ctx, hsName, vmUUID)
+		return callErr
+	})
+	if err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	out := make([]*pluginv1.AutomationSnapshot, 0, len(snapshots))
+	for i, s := range snapshots {
+		createdAt := parseTimeToUnix(s.CreatedTime)
+		out = append(out, &pluginv1.AutomationSnapshot{
+			Id:            int64(i),
+			Name:          s.SnapshotName,
+			CreatedAtUnix: createdAt,
+			State:         1,
+		})
+	}
+	return &pluginv1.ListSnapshotsResponse{Items: out}, nil
+}
+
+// CreateSnapshot 创建快照
+func (a *automationServer) CreateSnapshot(ctx context.Context, req *pluginv1.CreateSnapshotRequest) (*pluginv1.OperationResult, error) {
+	if a.core.cfg.DryRun {
+		return &pluginv1.OperationResult{Ok: true}, nil
+	}
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	if err := c.CreateSnapshot(ctx, hsName, vmUUID, "", ""); err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	return &pluginv1.OperationResult{Ok: true}, nil
+}
+
+// DeleteSnapshot 删除快照
+// snapshot_id = 快照索引（对应 ListSnapshots 返回的 id）
+func (a *automationServer) DeleteSnapshot(ctx context.Context, req *pluginv1.DeleteSnapshotRequest) (*pluginv1.OperationResult, error) {
+	if a.core.cfg.DryRun {
+		return &pluginv1.OperationResult{Ok: true}, nil
+	}
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	// 先获取快照列表，通过索引找到快照名称
+	snapshots, listErr := c.ListSnapshots(ctx, hsName, vmUUID)
+	if listErr != nil {
+		return nil, wrapHTTPTraceErr(listErr, last)
+	}
+	idx := int(req.GetSnapshotId())
+	if idx < 0 || idx >= len(snapshots) {
+		return nil, fmt.Errorf("snapshot index %d out of range (total: %d)", idx, len(snapshots))
+	}
+	if err := c.DeleteSnapshot(ctx, hsName, vmUUID, snapshots[idx].SnapshotName); err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	return &pluginv1.OperationResult{Ok: true}, nil
+}
+
+// RestoreSnapshot 恢复快照
+func (a *automationServer) RestoreSnapshot(ctx context.Context, req *pluginv1.RestoreSnapshotRequest) (*pluginv1.OperationResult, error) {
+	if a.core.cfg.DryRun {
+		return &pluginv1.OperationResult{Ok: true}, nil
+	}
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	// 先获取快照列表，通过索引找到快照名称
+	snapshots, listErr := c.ListSnapshots(ctx, hsName, vmUUID)
+	if listErr != nil {
+		return nil, wrapHTTPTraceErr(listErr, last)
+	}
+	idx := int(req.GetSnapshotId())
+	if idx < 0 || idx >= len(snapshots) {
+		return nil, fmt.Errorf("snapshot index %d out of range (total: %d)", idx, len(snapshots))
+	}
+	if err := c.RestoreSnapshot(ctx, hsName, vmUUID, snapshots[idx].SnapshotName); err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	return &pluginv1.OperationResult{Ok: true}, nil
+}
+
+// ---- 防火墙管理 ----
+
+// ListFirewallRules 获取防火墙规则列表
+func (a *automationServer) ListFirewallRules(ctx context.Context, req *pluginv1.ListFirewallRulesRequest) (*pluginv1.ListFirewallRulesResponse, error) {
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	var rules []FirewallRule
+	err = a.core.retry(func() error {
+		var callErr error
+		rules, callErr = c.ListFirewallRules(ctx, hsName, vmUUID)
+		return callErr
+	})
+	if err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	out := make([]*pluginv1.AutomationFirewallRule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, &pluginv1.AutomationFirewallRule{
+			Id:        int64(r.RuleID),
+			Direction: r.Direction,
+			Protocol:  r.Protocol,
+			Method:    r.Method,
+			Port:      r.Port,
+			Ip:        r.IP,
+			Priority:  int32(r.Priority),
+		})
+	}
+	return &pluginv1.ListFirewallRulesResponse{Items: out}, nil
+}
+
+// AddFirewallRule 添加防火墙规则
+func (a *automationServer) AddFirewallRule(ctx context.Context, req *pluginv1.AddFirewallRuleRequest) (*pluginv1.OperationResult, error) {
+	if a.core.cfg.DryRun {
+		return &pluginv1.OperationResult{Ok: true}, nil
+	}
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	rule := FirewallRule{
+		Direction: req.GetDirection(),
+		Protocol:  req.GetProtocol(),
+		Method:    req.GetMethod(),
+		Port:      req.GetPort(),
+		IP:        req.GetIp(),
+		Priority:  int(req.GetPriority()),
+	}
+	if err := c.AddFirewallRule(ctx, hsName, vmUUID, rule); err != nil {
+		return nil, wrapHTTPTraceErr(err, last)
+	}
+	return &pluginv1.OperationResult{Ok: true}, nil
+}
+
+// DeleteFirewallRule 删除防火墙规则
+func (a *automationServer) DeleteFirewallRule(ctx context.Context, req *pluginv1.DeleteFirewallRuleRequest) (*pluginv1.OperationResult, error) {
+	if a.core.cfg.DryRun {
+		return &pluginv1.OperationResult{Ok: true}, nil
+	}
+	c, last, err := a.core.newClientWithTrace()
+	if err != nil {
+		return nil, err
+	}
+	hsName, vmUUID, err := a.core.resolveInstanceWithFallback(ctx, req.GetInstanceId())
+	if err != nil {
+		return nil, err
+	}
+	if err := c.DeleteFirewallRule(ctx, hsName, vmUUID, int(req.GetRuleId())); err != nil {
 		return nil, wrapHTTPTraceErr(err, last)
 	}
 	return &pluginv1.OperationResult{Ok: true}, nil

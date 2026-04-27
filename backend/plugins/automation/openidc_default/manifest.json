@@ -11,7 +11,7 @@
   },
   "capabilities": {
     "automation": {
-      "features": ["catalog_sync", "lifecycle", "port_mapping", "backup", "panel_login"],
+      "features": ["catalog_sync", "lifecycle", "port_mapping", "backup", "snapshot", "firewall", "panel_login", "resize", "refund"],
       "catalog_readonly": false
     }
   }
