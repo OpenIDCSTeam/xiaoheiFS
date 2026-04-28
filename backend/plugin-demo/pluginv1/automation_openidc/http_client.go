@@ -32,10 +32,8 @@ type HTTPLogEntry struct {
 // NewClient 创建新的 OpenIDCS 客户端
 func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
 	if timeout <= 0 {
-		// 与 main.go 中的 newClient 兜底保持一致：优先采用调用方传入的 timeout_sec；
-		// 未配置时使用 60s 作为保底，既不至于让 Get/List 类查询卡太久，又能覆盖
-		// 绝大多数常规写接口。CreateVM 等极长耗时接口建议在配置里显式调大 timeout_sec。
-		timeout = 60 * time.Second
+		// 兜底 1800s：覆盖备份/快照等长耗时操作。
+		timeout = 1800 * time.Second
 	}
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
@@ -106,6 +104,8 @@ type ServerDetailConfig struct {
 	NMemPrice float64 `json:"n_mem_price"`
 	NHDDPrice float64 `json:"n_hdd_price"`
 	NNetPrice float64 `json:"n_net_price"`
+	// PublicAddr: 主机公网 IP 地址列表（来自 HSConfig.public_addr）
+	PublicAddr []string `json:"public_addr"`
 	// ServerPlan: key=plan_name, value=VMPlan（即 HostAgent VMConfig 的关键子字段）
 	ServerPlan map[string]VMPlan `json:"server_plan"`
 }
@@ -772,11 +772,20 @@ func (c *Client) GetVMStatus(ctx context.Context, hsName, vmUUID string) (map[st
 }
 
 // GetRemoteAccess 获取控制台访问地址（VNC/SSH）
+// HostAgent /api/client/remote 返回的 data 可能是：
+//   - 字符串：直接是 VNC 控制台 URL
+//   - JSON 对象：包含 console_url / terminal_url 等字段
 func (c *Client) GetRemoteAccess(ctx context.Context, hsName, vmUUID string) (RemoteAccess, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/client/remote/"+hsName+"/"+vmUUID, nil)
 	if err != nil {
 		return RemoteAccess{}, err
 	}
+	// 尝试作为字符串解析（HostAgent 直接返回 URL 字符串的情况）
+	var urlStr string
+	if err := json.Unmarshal(resp.Data, &urlStr); err == nil && urlStr != "" {
+		return RemoteAccess{ConsoleURL: urlStr}, nil
+	}
+	// 尝试作为 JSON 对象解析
 	var access RemoteAccess
 	if err := json.Unmarshal(resp.Data, &access); err != nil {
 		return RemoteAccess{}, fmt.Errorf("decode remote access: %w", err)
@@ -1014,12 +1023,15 @@ func (c *Client) ListBackups(ctx context.Context, hsName, vmUUID string) ([]Back
 // CreateBackup 创建备份
 func (c *Client) CreateBackup(ctx context.Context, hsName, vmUUID, backupName, description string) error {
 	body := map[string]any{}
-	if backupName != "" {
-		body["backup_name"] = backupName
+	// HostAgent 创建 backup 使用 vm_tips 作为备份说明
+	tips := description
+	if tips == "" {
+		tips = backupName
 	}
-	if description != "" {
-		body["description"] = description
+	if tips == "" {
+		tips = "备份 " + time.Now().Format("2006-01-02 15:04:05")
 	}
+	body["vm_tips"] = tips
 	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/backup/create/"+hsName+"/"+vmUUID, body)
 	return err
 }
@@ -1125,9 +1137,10 @@ func (c *Client) CreateSnapshot(ctx context.Context, hsName, vmUUID, snapshotNam
 	if tips == "" {
 		tips = snapshotName
 	}
-	if tips != "" {
-		body["vm_tips"] = tips
+	if tips == "" {
+		tips = "快照 " + time.Now().Format("2006-01-02 15:04:05")
 	}
+	body["vm_tips"] = tips
 	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/backup/create/"+hsName+"/"+vmUUID, body)
 	return err
 }
@@ -1166,10 +1179,14 @@ type FirewallRule struct {
 }
 
 // ListFirewallRules 获取防火墙规则列表（映射 NAT 转发规则）
-func (c *Client) ListFirewallRules(ctx context.Context, hsName, vmUUID string) ([]FirewallRule, error) {
+// publicIP 为主机公网 IP，用于填充防火墙规则的 IP 字段；为空时回退到 "0.0.0.0"。
+func (c *Client) ListFirewallRules(ctx context.Context, hsName, vmUUID, publicIP string) ([]FirewallRule, error) {
 	natRules, err := c.ListNATRules(ctx, hsName, vmUUID)
 	if err != nil {
 		return nil, err
+	}
+	if publicIP == "" {
+		publicIP = "0.0.0.0"
 	}
 	out := make([]FirewallRule, 0, len(natRules))
 	for _, r := range natRules {
@@ -1179,7 +1196,7 @@ func (c *Client) ListFirewallRules(ctx context.Context, hsName, vmUUID string) (
 			Protocol:  "tcp",
 			Method:    "allowed",
 			Port:      fmt.Sprintf("%d → %d", r.WanPort, r.LanPort),
-			IP:        "0.0.0.0",
+			IP:        publicIP,
 			Priority:  100,
 		})
 	}

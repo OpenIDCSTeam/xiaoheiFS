@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
+	"math/big"
 	"os"
 	"strings"
 	"sync"
@@ -67,6 +69,22 @@ func fnv64(s string) int64 {
 		v = -v // 保证正数，避免部分系统对负 ID 的处理问题
 	}
 	return v
+}
+
+// generateRandomPassword 生成指定长度的随机密码（字母+数字）
+func generateRandomPassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			// 极端情况下回退到固定字符
+			b[i] = charset[i%len(charset)]
+			continue
+		}
+		b[i] = charset[n.Int64()]
+	}
+	return string(b)
 }
 
 // idStore 维护 int64 ID → 字符串 的双向映射缓存
@@ -264,8 +282,8 @@ func (s *coreServer) newClient() (*Client, error) {
 	}
 	timeout := time.Duration(s.cfg.TimeoutSec) * time.Second
 	if timeout <= 0 {
-		// 兜底 60s：覆盖大部分查询接口；CreateVM 等长耗时接口推荐在配置中显式调大。
-		timeout = 60 * time.Second
+		// 兜底 1800s：覆盖备份/快照等长耗时操作。
+		timeout = 1800 * time.Second
 	}
 	return NewClient(s.cfg.BaseURL, s.cfg.APIKey, timeout), nil
 }
@@ -733,10 +751,13 @@ func (a *automationServer) CreateInstance(ctx context.Context, req *pluginv1.Cre
 		body["os_name"] = req.GetOs()
 	}
 	if req.GetPassword() != "" {
-		body["password"] = req.GetPassword()
+		body["os_pass"] = req.GetPassword()
 	}
+	// VNC 密码：优先使用传入值，否则自动生成8位随机密码传入 HostAgent
 	if req.GetVncPassword() != "" {
-		body["vnc_password"] = req.GetVncPassword()
+		body["vc_pass"] = req.GetVncPassword()
+	} else {
+		body["vc_pass"] = generateRandomPassword(8)
 	}
 
 	// 默认网卡配置：
@@ -761,6 +782,42 @@ func (a *automationServer) CreateInstance(ctx context.Context, req *pluginv1.Cre
 	if vmUUID == "" {
 		return nil, fmt.Errorf("HostAgent did not return vm_uuid in create response")
 	}
+
+	// 创建成功后，根据操作系统类型自动映射远程连接端口（NAT）
+	// Linux→22(SSH), Windows→3389(RDP), macOS→5900(VNC)
+	osNameLower := strings.ToLower(body["os_name"].(string))
+	if osNameLower == "" {
+		osNameLower = strings.ToLower(req.GetOs())
+	}
+	lanPort := 0
+	switch {
+	case strings.Contains(osNameLower, "win"):
+		lanPort = 3389
+	case strings.Contains(osNameLower, "mac") || strings.Contains(osNameLower, "darwin"):
+		lanPort = 5900
+	default:
+		// 默认按 Linux 处理
+		lanPort = 22
+	}
+	if lanPort > 0 {
+		// 从可用端口列表中获取一个宿主机端口
+		wanPort := 0
+		avail, portErr := c.GetAvailablePorts(ctx, hsName)
+		if portErr == nil && len(avail.AvailablePorts) > 0 {
+			wanPort = int(avail.AvailablePorts[0])
+		}
+		if wanPort > 0 {
+			natErr := c.AddNATRule(ctx, hsName, vmUUID, wanPort, lanPort, "tcp", fmt.Sprintf("auto-remote-%d", lanPort))
+			if natErr != nil {
+				pluginLog.Printf("[CreateInstance] 自动映射端口失败 hs=%s vm=%s lan=%d wan=%d: %v", hsName, vmUUID, lanPort, wanPort, natErr)
+			} else {
+				pluginLog.Printf("[CreateInstance] 自动映射端口成功 hs=%s vm=%s lan=%d wan=%d", hsName, vmUUID, lanPort, wanPort)
+			}
+		} else {
+			pluginLog.Printf("[CreateInstance] 无可用宿主机端口，跳过自动映射 hs=%s vm=%s", hsName, vmUUID)
+		}
+	}
+
 	instanceID := a.core.ids.instanceID(hsName, vmUUID)
 	return &pluginv1.CreateInstanceResponse{InstanceId: instanceID}, nil
 }
@@ -800,6 +857,24 @@ func (a *automationServer) GetInstance(ctx context.Context, req *pluginv1.GetIns
 		state = 10
 	}
 	instanceID := a.core.ids.instanceID(hsName, info.VMUUID)
+
+	// 构建远程地址：public_addr:映射端口
+	// 查询主机 public_addr 和 NAT 规则，拼接为 "公网IP:宿主机端口" 格式
+	remoteAddr := info.IPAddress // 兜底：使用虚拟机内网 IP
+	if publicIP := resolvePublicIP(ctx, c, hsName); publicIP != "" {
+		remoteAddr = publicIP // 有公网 IP 时优先使用
+		// 查询 NAT 规则，找到远程连接端口（SSH/RDP/VNC）
+		natRules, natErr := c.ListNATRules(ctx, hsName, info.VMUUID)
+		if natErr == nil {
+			for _, rule := range natRules {
+				if rule.LanPort == 22 || rule.LanPort == 3389 || rule.LanPort == 5900 {
+					remoteAddr = fmt.Sprintf("%s:%d", publicIP, rule.WanPort)
+					break
+				}
+			}
+		}
+	}
+
 	return &pluginv1.GetInstanceResponse{
 		Instance: &pluginv1.AutomationInstance{
 			Id:       instanceID,
@@ -808,7 +883,7 @@ func (a *automationServer) GetInstance(ctx context.Context, req *pluginv1.GetIns
 			Cpu:      int32(info.CPUNum),
 			MemoryGb: int32(info.MemNum / 1024), // MB → GB
 			DiskGb:   int32(info.HDDNum / 1024), // MB → GB（HostAgent VMConfig.hdd_num 单位为 MB）
-			RemoteIp: info.IPAddress,
+			RemoteIp: remoteAddr,
 		},
 	}, nil
 }
@@ -1165,13 +1240,13 @@ func (a *automationServer) GetMonitor(ctx context.Context, req *pluginv1.GetMoni
 	netRx := extractFloat(latestStatus, "network_d", "network_rx_rate", "net_rx", "rx_rate", "rx_bytes", "NetworkRxRate", "bytes_in")
 	netTx := extractFloat(latestStatus, "network_u", "network_tx_rate", "net_tx", "tx_rate", "tx_bytes", "NetworkTxRate", "bytes_out")
 
-	// 计算 CPU 百分比：cpu_usage 是已用核心数，cpu_total 是总核心数
+	// 计算 CPU 百分比：cpu_usage 是单核百分比（0~100），直接使用
 	cpuPercent := 0.0
-	if cpuTotal > 0 {
-		cpuPercent = cpuUsage / cpuTotal * 100
-	} else if cpuUsage > 0 && cpuUsage <= 100 {
-		// 兼容直接返回百分比的情况
+	if cpuUsage > 0 && cpuUsage <= 100 {
 		cpuPercent = cpuUsage
+	} else if cpuTotal > 0 && cpuUsage > 100 {
+		// 兼容旧版返回多核总百分比的情况（如4核满载=400），需除以核心数
+		cpuPercent = cpuUsage / cpuTotal
 	}
 
 	// 计算内存百分比：mem_usage 是已用MB，mem_total 是总MB
@@ -1249,6 +1324,7 @@ func (a *automationServer) ListPortMappings(ctx context.Context, req *pluginv1.L
 	if err != nil {
 		return nil, err
 	}
+	publicIP := resolvePublicIP(ctx, c, hsName)
 	var rules []NATRule
 	err = a.core.retry(func() error {
 		var callErr error
@@ -1260,10 +1336,15 @@ func (a *automationServer) ListPortMappings(ctx context.Context, req *pluginv1.L
 	}
 	out := make([]*pluginv1.AutomationPortMapping, 0, len(rules))
 	for _, rule := range rules {
+		// sport 格式：若有公网 IP 则为 "public_addr:port"，否则仅端口号
+		sport := fmt.Sprintf("%d", rule.WanPort)
+		if publicIP != "" {
+			sport = fmt.Sprintf("%s:%d", publicIP, rule.WanPort)
+		}
 		out = append(out, &pluginv1.AutomationPortMapping{
 			Id:    int64(rule.RuleIndex),
 			Name:  rule.NatTips,
-			Sport: fmt.Sprintf("%d/tcp", rule.WanPort),
+			Sport: sport,
 			Dport: int64(rule.LanPort),
 		})
 	}
@@ -1576,10 +1657,11 @@ func (a *automationServer) ListFirewallRules(ctx context.Context, req *pluginv1.
 	if err != nil {
 		return nil, err
 	}
+	publicIP := resolvePublicIP(ctx, c, hsName)
 	var rules []FirewallRule
 	err = a.core.retry(func() error {
 		var callErr error
-		rules, callErr = c.ListFirewallRules(ctx, hsName, vmUUID)
+		rules, callErr = c.ListFirewallRules(ctx, hsName, vmUUID, publicIP)
 		return callErr
 	})
 	if err != nil {
@@ -1647,6 +1729,19 @@ func (a *automationServer) DeleteFirewallRule(ctx context.Context, req *pluginv1
 }
 
 // ---- 工具函数 ----
+
+// resolvePublicIP 查询主机的公网 IP（取 public_addr 列表的第一个）。
+// 查询失败或 public_addr 为空时返回空字符串。
+func resolvePublicIP(ctx context.Context, c *Client, hsName string) string {
+	servers, err := c.ListServers(ctx)
+	if err != nil {
+		return ""
+	}
+	if srv, ok := servers[hsName]; ok && len(srv.Config.PublicAddr) > 0 {
+		return srv.Config.PublicAddr[0]
+	}
+	return ""
+}
 
 // parseTimeToUnix 解析时间字符串为 Unix 时间戳
 func parseTimeToUnix(s string) int64 {
