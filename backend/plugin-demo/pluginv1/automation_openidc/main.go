@@ -377,13 +377,19 @@ func (s *coreServer) resolveLineWithFallback(ctx context.Context, lineID int64) 
 	return "", fmt.Errorf("line_id %d not found in OpenIDCS", lineID)
 }
 
-// wrapHTTPTraceErr 包装 HTTP 追踪错误信息
-//
-// 关键点：`last` 仅记录最近一次 HTTP 请求，err 可能来自**本次 HTTP 请求之后**
-// 的解析/逻辑阶段（例如 JSON 解码、字段校验）。因此不能仅依赖上游 body.msg
-// 构造错误描述——当上游响应本身是成功（success=true / msg ∈ {success, ok}）时，
-// 必须退回到原始 err 的文本，否则用户会看到「rpc error desc = success」
-// 这种自相矛盾的提示。
+// resolvePublicIP 从主机配置中获取公网 IP（ServerDetailConfig.PublicAddr[0]）。
+// NAT 机器若未配置公网 IP 则返回 ""。
+func resolvePublicIP(ctx context.Context, c *Client, hsName string) string {
+	servers, err := c.ListServers(ctx)
+	if err != nil {
+		return ""
+	}
+	if srv, ok := servers[hsName]; ok && len(srv.Config.PublicAddr) > 0 {
+		return srv.Config.PublicAddr[0]
+	}
+	return ""
+}
+
 func wrapHTTPTraceErr(err error, last *HTTPLogEntry) error {
 	if err == nil {
 		return nil
@@ -821,6 +827,11 @@ c, last, err := a.core.newClientWithTrace()
 		}
 	}
 
+	// 创建完成后自动开机
+	if startErr := c.PowerVM(ctx, hsName, vmUUID, "S_START"); startErr != nil {
+		pluginLog.Printf("[CreateInstance] 自动开机失败 hs=%s vm=%s: %v", hsName, vmUUID, startErr)
+	}
+
 	instanceID := a.core.ids.instanceID(hsName, vmUUID)
 	return &pluginv1.CreateInstanceResponse{InstanceId: instanceID}, nil
 }
@@ -871,6 +882,7 @@ func (a *automationServer) GetInstance(ctx context.Context, req *pluginv1.GetIns
 	// 重要：只要 GetVM 能成功返回虚拟机信息，就说明 HostAgent 已完成创建，
 	// 默认 state=3（stopped/就绪）。不再依赖虚拟机电源状态来判断是否"开通完成"，
 	// 避免因 vm_flag=UNKNOWN/STOPPED 导致 provision_worker 误判为仍在创建中。
+	info.normalizeStatus()
 	state := int32(3) // 默认：已就绪（stopped）
 	switch strings.ToLower(info.Status) {
 	case "running", "powered_on", "starting":
@@ -1013,7 +1025,7 @@ c, last, err := a.core.newClientWithTrace()
 	return &pluginv1.OperationResult{Ok: true}, nil
 }
 
-// Rebuild 重装系统（挂载 ISO + 重启）
+// Rebuild 重装系统（调用 HostAgent /api/client/reinstall 接口替换系统磁盘）
 // image_id = fnv64(hs_name + "/img/" + img.File)
 func (a *automationServer) Rebuild(ctx context.Context, req *pluginv1.RebuildRequest) (*pluginv1.OperationResult, error) {
 	if a.core.cfg.DryRun {
@@ -1027,25 +1039,20 @@ c, last, err := a.core.newClientWithTrace()
 	if err != nil {
 		return nil, err
 	}
-	// 解析 image_id → ISO 文件名
-	isoName := ""
+	// 解析 image_id → 系统模板文件名
+	osName := ""
 	if req.GetImageId() != 0 {
 		if raw, ok := a.core.ids.get(req.GetImageId()); ok {
 			parts := strings.SplitN(raw, "/img/", 2)
 			if len(parts) == 2 {
-				isoName = parts[1]
+				osName = parts[1]
 			}
 		}
 	}
-	if isoName == "" {
+	if osName == "" {
 		return nil, fmt.Errorf("image_id %d not found in cache, please call ListImages first", req.GetImageId())
 	}
-	// 步骤1：挂载 ISO
-	if mountErr := c.MountISO(ctx, hsName, vmUUID, isoName); mountErr != nil {
-		return nil, wrapHTTPTraceErr(mountErr, last)
-	}
-	// 步骤2：重启虚拟机
-	if err := c.PowerVM(ctx, hsName, vmUUID, "S_RESET"); err != nil {
+	if err := c.ReinstallVM(ctx, hsName, vmUUID, osName, req.GetPassword()); err != nil {
 		return nil, wrapHTTPTraceErr(err, last)
 	}
 	return &pluginv1.OperationResult{Ok: true}, nil
@@ -1056,7 +1063,7 @@ func (a *automationServer) ResetPassword(ctx context.Context, req *pluginv1.Rese
 	if a.core.cfg.DryRun {
 		return &pluginv1.OperationResult{Ok: true}, nil
 	}
-c, last, err := a.core.newClientWithTrace()
+	c, last, err := a.core.newClientWithTrace()
 	if err != nil {
 		return nil, err
 	}
@@ -1064,9 +1071,9 @@ c, last, err := a.core.newClientWithTrace()
 	if err != nil {
 		return nil, err
 	}
-	if err := c.UpdateVM(ctx, hsName, vmUUID, map[string]any{
-		"password": req.GetPassword(),
-	}); err != nil {
+	// 使用专用密码重置接口，不会强制重启虚拟机
+	// HostAgent 会通过 QEMU Guest Agent 热修改密码
+	if err := c.ResetOSPassword(ctx, hsName, vmUUID, req.GetPassword()); err != nil {
 		return nil, wrapHTTPTraceErr(err, last)
 	}
 	return &pluginv1.OperationResult{Ok: true}, nil
@@ -1750,21 +1757,6 @@ func (a *automationServer) DeleteFirewallRule(ctx context.Context, req *pluginv1
 		return nil, wrapHTTPTraceErr(err, last)
 	}
 	return &pluginv1.OperationResult{Ok: true}, nil
-}
-
-// ---- 工具函数 ----
-
-// resolvePublicIP 查询主机的公网 IP（取 public_addr 列表的第一个）。
-// 查询失败或 public_addr 为空时返回空字符串。
-func resolvePublicIP(ctx context.Context, c *Client, hsName string) string {
-	servers, err := c.ListServers(ctx)
-	if err != nil {
-		return ""
-	}
-	if srv, ok := servers[hsName]; ok && len(srv.Config.PublicAddr) > 0 {
-		return srv.Config.PublicAddr[0]
-	}
-	return ""
 }
 
 // parseTimeToUnix 解析时间字符串为 Unix 时间戳

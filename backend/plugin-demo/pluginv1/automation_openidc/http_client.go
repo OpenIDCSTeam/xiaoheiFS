@@ -739,6 +739,18 @@ func (c *Client) UpdateVM(ctx context.Context, hsName, vmUUID string, req map[st
 	return err
 }
 
+// ResetOSPassword 修改虚拟机操作系统密码（专用接口，不会强制重启）
+// 调用 HostAgent POST /api/client/password/{hs_name}/{vm_uuid}
+// HostAgent 会通过 QEMU Guest Agent 热修改密码（无需重启）
+func (c *Client) ResetOSPassword(ctx context.Context, hsName, vmUUID string, password string) error {
+	body := map[string]any{
+		"type":     "os_password",
+		"password": password,
+	}
+	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/password/"+hsName+"/"+vmUUID, body)
+	return err
+}
+
 // DeleteVM 删除虚拟机
 func (c *Client) DeleteVM(ctx context.Context, hsName, vmUUID string) error {
 	_, err := c.doRequest(ctx, http.MethodDelete, "/api/client/delete/"+hsName+"/"+vmUUID, nil)
@@ -977,6 +989,17 @@ func (c *Client) MountISO(ctx context.Context, hsName, vmUUID, isoName string) e
 	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/iso/mount/"+hsName+"/"+vmUUID, map[string]any{
 		"iso_name": isoName,
 	})
+	return err
+}
+
+// ReinstallVM 重装系统（HostAgent POST /api/client/reinstall/{hs}/{vm}）
+// osName 为系统模板文件名（来自 system_maps），password 为新系统密码（os_pass）。
+func (c *Client) ReinstallVM(ctx context.Context, hsName, vmUUID, osName, password string) error {
+	body := map[string]any{"os_name": osName}
+	if password != "" {
+		body["os_pass"] = password
+	}
+	_, err := c.doRequest(ctx, http.MethodPost, "/api/client/reinstall/"+hsName+"/"+vmUUID, body)
 	return err
 }
 

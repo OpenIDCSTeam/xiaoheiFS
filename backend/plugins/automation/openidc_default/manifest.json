@@ -11,8 +11,20 @@
   },
   "capabilities": {
     "automation": {
-      "features": ["catalog_sync", "lifecycle", "port_mapping", "backup", "snapshot", "firewall", "panel_login", "vnc", "resize", "refund"],
-      "catalog_readonly": false
+      "features": [
+        "catalog_sync",
+        "lifecycle",
+        "port_mapping",
+        "backup",
+        "snapshot",
+        "firewall",
+        "panel_login",
+        "vnc",
+        "reinstall",
+        "reset_password",
+        "resize",
+        "refund"
+      ]
     }
   }
 }
