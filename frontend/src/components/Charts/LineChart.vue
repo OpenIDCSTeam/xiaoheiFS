@@ -46,7 +46,7 @@ const formatTooltipValue = (value) => {
 };
 
 const render = () => {
-  if (!el.value) return;
+  if (!el.value || !el.value.clientWidth || !el.value.clientHeight) return;
   chart = chart || echarts.init(el.value);
   const labels = Array.isArray(props.data?.labels) ? props.data.labels : [];
   const values = Array.isArray(props.data?.values) ? props.data.values : [];
@@ -133,7 +133,7 @@ onMounted(() => {
   });
   window.addEventListener("resize", resize);
   if (el.value && typeof ResizeObserver !== "undefined") {
-    resizeObserver = new ResizeObserver(() => resize());
+    resizeObserver = new ResizeObserver(() => { render(); resize(); });
     resizeObserver.observe(el.value);
   }
 });

@@ -1,4 +1,5 @@
 <template>
+  <div>
   <slot v-if="!hasError" />
   <div v-else class="error-boundary">
     <div class="error-card">
@@ -9,6 +10,7 @@
         <a-button type="primary" @click="reload">刷新页面</a-button>
       </div>
     </div>
+  </div>
   </div>
 </template>
 
