@@ -739,9 +739,9 @@ c, last, err := a.core.newClientWithTrace()
 		}
 	}
 	body := map[string]any{
-		// 不传 vm_uuid，让 HostAgent 根据主机配置的 filter_name 前缀 + 随机字符自动生成。
-		// 这样 vm_uuid 格式为 "{filter_name}-{random8}"，与 HostAgent 面板一致。
-		// vm_name 仅作为显示名传递，HostAgent 当前版本会忽略此字段。
+		// vm_uuid 同时作为虚拟机名称下发，确保创建后可通过该值回查 VM。
+		// vm_name 作为显示名同步传递（新版 HostAgent 兼容）。
+		"vm_uuid": req.GetName(),
 		"vm_name": req.GetName(),
 		"cpu_num": req.GetCpu(),
 		"mem_num": req.GetMemoryGb() * 1024, // GB → MB
@@ -787,7 +787,8 @@ c, last, err := a.core.newClientWithTrace()
 
 	// 创建成功后，根据操作系统类型自动映射远程连接端口（NAT）
 	// Linux→22(SSH), Windows→3389(RDP), macOS→5900(VNC)
-	osNameLower := strings.ToLower(body["os_name"].(string))
+	osNameStr, _ := body["os_name"].(string)
+	osNameLower := strings.ToLower(osNameStr)
 	if osNameLower == "" {
 		osNameLower = strings.ToLower(req.GetOs())
 	}
