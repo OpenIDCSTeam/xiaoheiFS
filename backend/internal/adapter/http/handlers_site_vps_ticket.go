@@ -145,6 +145,11 @@ func (h *Handler) VPSMonitor(c *gin.Context) {
 			payload["automation_state"] = 0
 		}
 		payload["monitor_error"] = err.Error()
+		payload["cpu"] = 0
+		payload["memory"] = 0
+		payload["bytes_in"] = int64(0)
+		payload["bytes_out"] = int64(0)
+		payload["storage"] = 0
 		c.JSON(http.StatusOK, payload)
 		return
 	}
