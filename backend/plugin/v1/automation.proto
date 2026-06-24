@@ -13,6 +13,10 @@ service AutomationService {
   rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
   rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
 
+  // Catalog write-back (optional)
+  rpc UpsertPackage(UpsertPackageRequest) returns (OperationResult);
+  rpc DeletePackage(DeletePackageRequest) returns (OperationResult);
+
   // Instance lifecycle
   rpc CreateInstance(CreateInstanceRequest) returns (CreateInstanceResponse);
   rpc GetInstance(GetInstanceRequest) returns (GetInstanceResponse);
@@ -115,6 +119,26 @@ message ListPackagesResponse { repeated AutomationPackage items = 1; }
 
 message ListImagesRequest { int64 line_id = 1; }
 message ListImagesResponse { repeated AutomationImage items = 1; }
+
+// ---- Catalog write-back ----
+// UpsertPackageRequest 映射 HostAgent POST /api/server/plan/<hs_name>
+// line_id 由插件反查为 hs_name；package_name 直接作为 HostAgent plan_name（业务稳定键）。
+message UpsertPackageRequest {
+  int64 line_id = 1;
+  string package_name = 2;
+  int32 cpu = 3;
+  int32 memory_gb = 4;
+  int32 disk_gb = 5;
+  int32 bandwidth_mbps = 6;
+  int32 traffic_gb = 7;
+  int32 gpu_mem_gb = 8;
+}
+
+// DeletePackageRequest 映射 HostAgent DELETE /api/server/plan/<hs_name>/<plan_name>
+message DeletePackageRequest {
+  int64 line_id = 1;
+  string package_name = 2;
+}
 
 message CreateInstanceRequest {
   int64 line_id = 1;
