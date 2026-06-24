@@ -524,11 +524,20 @@ func (s *Service) appendSyncLog(ctx context.Context, target, mode, status, messa
 
 func normalizeImageType(v string) string {
 	normalized := strings.ToLower(strings.TrimSpace(v))
+	if normalized == "" {
+		return "linux"
+	}
 	if strings.Contains(normalized, "win") {
 		return "windows"
 	}
-	if normalized == "" {
-		return "linux"
+	if strings.Contains(normalized, "mac") ||
+		strings.Contains(normalized, "osx") ||
+		strings.Contains(normalized, "darwin") {
+		return "macos"
+	}
+	switch normalized {
+	case "linux", "windows", "macos":
+		return normalized
 	}
 	return "linux"
 }

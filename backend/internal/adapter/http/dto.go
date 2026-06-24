@@ -101,6 +101,7 @@ type SystemImageDTO struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
+	LineNames []string `json:"line_names,omitempty"`
 }
 
 type BillingCycleDTO struct {

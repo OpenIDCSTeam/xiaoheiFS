@@ -47,7 +47,19 @@ func (h *Handler) AdminSystemImages(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": domain.ErrListError.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": toSystemImageDTOs(items)})
+	dtos := toSystemImageDTOs(items)
+	if len(dtos) > 0 {
+		imageIDs := make([]int64, 0, len(items))
+		for _, it := range items {
+			imageIDs = append(imageIDs, it.ID)
+		}
+		if lineNames, err := h.catalogSvc.ListImageLineNames(c, imageIDs); err == nil {
+			for i := range dtos {
+				dtos[i].LineNames = lineNames[dtos[i].ID]
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"items": dtos})
 }
 
 func (h *Handler) AdminRegions(c *gin.Context) {
@@ -128,6 +140,34 @@ func (h *Handler) AdminRegionDelete(c *gin.Context) {
 		return
 	}
 	if err := h.catalogSvc.DeleteRegion(c, uri.ID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// AdminRegionSetActive 需求2：地区启用/禁用开关
+// 独立端点，不受插件 catalog_readonly 只读限制影响。
+// 仅修改 Active 字段；不触发 HostAgent 联动（地区 code 归属 HostAgent server_area 属于主机级字段，
+// 本地启停不需要传回上游，仅作为前台展示与下单准入的闸门）。
+func (h *Handler) AdminRegionSetActive(c *gin.Context) {
+	var uri adminIDURI
+	if err := c.ShouldBindUri(&uri); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrInvalidId.Error()})
+		return
+	}
+	var payload struct {
+		Active *bool `json:"active"`
+	}
+	if err := bindJSON(c, &payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrInvalidBody.Error()})
+		return
+	}
+	if payload.Active == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrInvalidBody.Error()})
+		return
+	}
+	if err := h.catalogSvc.SetRegionActive(c, uri.ID, *payload.Active); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

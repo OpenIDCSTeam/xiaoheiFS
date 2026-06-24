@@ -145,3 +145,31 @@ func (r *GormRepo) SetLineSystemImages(ctx context.Context, lineID int64, system
 	})
 
 }
+
+// ListImageLineNames 批量查询每个镜像关联的线路名列表（去重，单次 JOIN）。
+func (r *GormRepo) ListImageLineNames(ctx context.Context, imageIDs []int64) (map[int64][]string, error) {
+	out := make(map[int64][]string)
+	if len(imageIDs) == 0 {
+		return out, nil
+	}
+	type row struct {
+		SystemImageID int64  `gorm:"column:system_image_id"`
+		LineName      string `gorm:"column:line_name"`
+	}
+	var rows []row
+	if err := r.gdb.WithContext(ctx).
+		Table("line_system_images lsi").
+		Select("lsi.system_image_id, pg.name AS line_name").
+		Joins("JOIN plan_groups pg ON pg.line_id = lsi.line_id").
+		Where("lsi.system_image_id IN ?", imageIDs).
+		Group("lsi.system_image_id, lsi.line_id").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if r.LineName != "" {
+			out[r.SystemImageID] = append(out[r.SystemImageID], r.LineName)
+		}
+	}
+	return out, nil
+}

@@ -38,7 +38,26 @@ func (h *Handler) AdminGoodsTypes(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": domain.ErrListError.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	type goodsTypeItem struct {
+		domain.GoodsType
+		PluginBaseURL string `json:"plugin_base_url,omitempty"`
+	}
+	out := make([]goodsTypeItem, 0, len(items))
+	for _, gt := range items {
+		it := goodsTypeItem{GoodsType: gt}
+		if gt.AutomationPluginID != "" && gt.AutomationInstanceID != "" {
+			if cfgJSON, err := h.pluginAdmin.GetConfigInstance(c, "automation", gt.AutomationPluginID, gt.AutomationInstanceID); err == nil {
+				var cfg struct {
+					BaseURL string `json:"base_url"`
+				}
+				if json.Unmarshal([]byte(cfgJSON), &cfg) == nil {
+					it.PluginBaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+				}
+			}
+		}
+		out = append(out, it)
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
 }
 
 func (h *Handler) AdminGoodsTypeCreate(c *gin.Context) {
