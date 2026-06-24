@@ -42,6 +42,7 @@ type CatalogRepository interface {
 	GetRegion(ctx context.Context, id int64) (domain.Region, error)
 	CreateRegion(ctx context.Context, region *domain.Region) error
 	UpdateRegion(ctx context.Context, region domain.Region) error
+	SetRegionActive(ctx context.Context, id int64, active bool) error
 	DeleteRegion(ctx context.Context, id int64) error
 	CreatePlanGroup(ctx context.Context, plan *domain.PlanGroup) error
 	UpdatePlanGroup(ctx context.Context, plan domain.PlanGroup) error
@@ -67,6 +68,7 @@ type SystemImageRepository interface {
 	UpdateSystemImage(ctx context.Context, img domain.SystemImage) error
 	DeleteSystemImage(ctx context.Context, id int64) error
 	SetLineSystemImages(ctx context.Context, lineID int64, systemImageIDs []int64) error
+	ListImageLineNames(ctx context.Context, imageIDs []int64) (map[int64][]string, error)
 }
 
 type CartRepository interface {

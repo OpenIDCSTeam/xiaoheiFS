@@ -54,6 +54,11 @@ func (s *Service) ListPlanGroups(ctx context.Context) ([]domain.PlanGroup, error
 	return s.catalog.ListPlanGroups(ctx)
 }
 
+func (s *Service) SetRegionActive(ctx context.Context, id int64, active bool) error {
+	return s.catalog.SetRegionActive(ctx, id, active)
+}
+
+
 func (s *Service) GetRegion(ctx context.Context, id int64) (domain.Region, error) {
 	return s.catalog.GetRegion(ctx, id)
 }
@@ -172,13 +177,20 @@ func (s *Service) SetLineSystemImages(ctx context.Context, lineID int64, systemI
 	return s.images.SetLineSystemImages(ctx, lineID, systemImageIDs)
 }
 
+func (s *Service) ListImageLineNames(ctx context.Context, imageIDs []int64) (map[int64][]string, error) {
+	if len(imageIDs) == 0 {
+		return map[int64][]string{}, nil
+	}
+	return s.images.ListImageLineNames(ctx, imageIDs)
+}
+
 func (s *Service) GetSystemImage(ctx context.Context, id int64) (domain.SystemImage, error) {
 	return s.images.GetSystemImage(ctx, id)
 }
 
 func validateSystemImageType(t string) error {
 	switch strings.ToLower(t) {
-	case "", "linux", "windows":
+	case "", "linux", "windows", "macos":
 		return nil
 	default:
 		return appshared.ErrInvalidInput

@@ -109,6 +109,7 @@ func InitRegistry() {
 	Register("region.create", "创建区域", "区域管理", 3)
 	Register("region.update", "更新区域", "区域管理", 4)
 	Register("region.delete", "删除区域", "区域管理", 5)
+	Register("region.set_active", "设置区域启用状态", "区域管理", 6)
 
 	Register("billing_cycle.view", "查看计费周期详情", "计费周期", 1)
 	Register("billing_cycle.list", "查看计费周期列表", "计费周期", 2)

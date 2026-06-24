@@ -2256,6 +2256,15 @@ paths:
       responses:
         '200':
           description: OK
+  /admin/api/v1/regions/{id}/active:
+    patch:
+      summary: Set region active status
+      description: Independent endpoint not restricted by catalog_readonly. Only modifies the Active field; does not trigger HostAgent linkage.
+      security:
+        - AdminJWT: []
+      responses:
+        '200':
+          description: OK
   /admin/api/v1/plan-groups:
     get:
       summary: List plan groups

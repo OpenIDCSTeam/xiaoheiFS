@@ -150,6 +150,14 @@ func (r *GormRepo) DeleteRegion(ctx context.Context, id int64) error {
 
 }
 
+func (r *GormRepo) SetRegionActive(ctx context.Context, id int64, active bool) error {
+	return r.gdb.WithContext(ctx).Model(&regionRow{}).Where("id = ?", id).Updates(map[string]any{
+		"active":     boolToInt(active),
+		"updated_at": time.Now(),
+	}).Error
+}
+
+
 func (r *GormRepo) ListPlanGroups(ctx context.Context) ([]domain.PlanGroup, error) {
 
 	var rows []planGroupRow

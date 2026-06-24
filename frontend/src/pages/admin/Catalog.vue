@@ -1655,6 +1655,22 @@ const bulkRemoveImages = () => {
   });
 };
 
+// 镜像启用开关
+const imageEnabledBusy = reactive<Record<number, boolean>>({});
+const toggleImageEnabled = async (record: any, nextEnabled: boolean) => {
+  const rid = record?.id;
+  if (!rid) return;
+  imageEnabledBusy[rid] = true;
+  try {
+    await updateSystemImage(rid, { enabled: nextEnabled });
+    record.enabled = nextEnabled;
+    message.success(nextEnabled ? "已启用" : "已停用");
+  } catch (e: any) {
+    message.error(extractUpstreamErrorMessage(e));
+  } finally {
+    imageEnabledBusy[rid] = false;
+  }
+};
 const syncImages = async () => {
   if (!imageLineId.value) {
     message.error("请先选择线路再同步镜像");
