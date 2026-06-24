@@ -146,12 +146,21 @@
               <ElTableColumn prop="id" label="ID" width="90" />
               <ElTableColumn prop="name" label="名称" min-width="180" />
               <ElTableColumn prop="code" label="代码" min-width="140" />
-              <ElTableColumn label="状态" width="100">
+              <ElTableColumn label="状态" width="120">
                 <template #default="{ row }">
-                  <ElTag :type="row.active ? 'success' : 'danger'">{{
-                    row.active ? '启用' : '停用'
-                  }}</ElTag>
+                  <ElSwitch
+                    :model-value="row.active"
+                    :loading="!!regionActiveBusy[row.id]"
+                    active-text="启用"
+                    inactive-text="停用"
+                    inline-prompt
+                    :disabled="isCatalogReadonly || !hasPermission('region.set_active')"
+                    @change="(v: boolean) => toggleRegionActive(row, v)"
+                  />
                 </template>
+              </ElTableColumn>
+              <ElTableColumn label="线路数" width="90" align="center">
+                <template #default="{ row }">{{ lineCountByRegion[row.id] ?? 0 }}</template>
               </ElTableColumn>
               <ElTableColumn label="操作" width="150" fixed="right">
                 <template #default="{ row }">
@@ -653,6 +662,7 @@
     updateAdminPackage,
     updateAdminPlanGroup,
     updateAdminRegion,
+    setAdminRegionActive,
     updateAdminSystemImage
   } from '@/api/admin'
   import { useUserStore } from '@/store/modules/user'
@@ -966,6 +976,16 @@
         label: `${item.name}${item.line_id ? ` / ${item.line_id}` : ''}`
       }))
   )
+
+  const lineCountByRegion = computed(() => {
+    const map: Record<number, Set<number>> = {}
+    for (const pg of planGroups.value) {
+      if (pg.region_id != null && pg.line_id != null) {
+        ;(map[pg.region_id] ??= new Set()).add(pg.line_id)
+      }
+    }
+    return Object.fromEntries(Object.entries(map).map(([k, v]) => [+k, v.size]))
+  })
 
   const automationOptions = computed(() =>
     automationPlugins.value.map((item) => {
@@ -1651,6 +1671,24 @@
     await bulkDeleteAdminRegions(selectedRegionIds.value)
     ElMessage.success('已批量删除地区')
     await loadCatalogData()
+  }
+
+  // 地区启用/禁用开关（独立端点，不受 catalog_readonly 限制）
+  const regionActiveBusy = reactive<Record<number, boolean>>({})
+
+  async function toggleRegionActive(row: RegionRow, nextActive: boolean) {
+    const rid = row.id
+    if (!rid) return
+    regionActiveBusy[rid] = true
+    try {
+      await setAdminRegionActive(rid, nextActive)
+      row.active = nextActive
+      ElMessage.success(nextActive ? '已启用' : '已停用')
+    } catch (e: any) {
+      ElMessage.error(e?.message || '操作失败')
+    } finally {
+      regionActiveBusy[rid] = false
+    }
   }
 
   async function loadPlanGroupImages(planGroupId: number) {

@@ -2256,6 +2256,13 @@ export function bulkDeleteAdminRegions(ids: Array<number | string>) {
   })
 }
 
+export function setAdminRegionActive(id: number | string, active: boolean) {
+  return request.patch<{ ok?: boolean }>({
+    url: `/admin/api/v1/regions/${id}/active`,
+    data: { active }
+  })
+}
+
 export function fetchAdminPlanGroups(params?: Record<string, unknown>) {
   return request.get<ApiList<CatalogPlanGroup>>({
     url: '/admin/api/v1/plan-groups',
